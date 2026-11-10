@@ -1,0 +1,46 @@
+{
+  "name": "boi-health-camp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "dev:local": "node scripts/with-local-env.ts npx next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "VITEST_UNIT_ONLY=1 vitest run tests/unit",
+    "test:e2e": "node scripts/with-local-env.ts npx playwright test",
+    "db:start": "supabase start -x imgproxy,edge-runtime,logflare,vector,supavisor,mailpit",
+    "db:reset": "supabase db reset",
+    "seed": "node scripts/seed.ts",
+    "build:local": "node scripts/with-local-env.ts npx next build",
+    "load-test": "node scripts/load-test.ts"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.119.0",
+    "bwip-js": "^4.11.4",
+    "next": "16.4.6",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^18.0.10",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.6",
+    "typescript": "^5",
+    "vitest": "^5.1.0"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}
