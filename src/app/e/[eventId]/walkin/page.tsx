@@ -7,11 +7,12 @@ import { Card, Empty, PageHead, SourceTag, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
 import { myStations } from '@/lib/duty';
 import { dt } from '@/lib/format';
-import { resolveScan } from '@/lib/scan';
+import { ScanMatches } from '@/components/ScanMatches';
+import { resolveScan, searchRegistrations } from '@/lib/scan';
 
 type Task = { id: string; service_id: string; service_name: string; source: string; status: string; status_reason: string | null; choice_group_id: string | null;
-  external_accession: string | null; station_id: string | null; payment_intent_id: string | null; payment_exception: boolean;
-  task_items: { order_items: { test_name: string; status: string } }[] };
+  external_accession: string | null; station_id: string | null; payment_intent_id: string | null; payment_exception: boolean; payment_cleared: boolean;
+  task_items: { order_items: { id: string; test_name: string; status: string; completion_rule: string } }[] };
 
 export default async function Walkin({ params, searchParams }: { params: Promise<{ eventId: string }>; searchParams: Promise<{ at?: string; scan?: string; reg?: string }> }) {
   const { eventId } = await params;
@@ -32,7 +33,7 @@ export default async function Walkin({ params, searchParams }: { params: Promise
     if (regId) {
       const [{ data: reg }, { data: tasks }, { data: visits }] = await Promise.all([
         ctx.supabase.from('registrations').select('id, registration_code, status, participants(full_name), packages(name), package_configuration_versions(snapshot)').eq('id', regId).maybeSingle(),
-        ctx.supabase.from('participant_tasks').select('id, service_id, service_name, source, status, status_reason, choice_group_id, external_accession, station_id, payment_intent_id, payment_exception, task_items(order_items(test_name, status))')
+        ctx.supabase.from('participant_tasks').select('id, service_id, service_name, source, status, status_reason, choice_group_id, external_accession, station_id, payment_intent_id, payment_exception, task_items(order_items(id, test_name, status, completion_rule)), payment_cleared')
           .eq('registration_id', regId).eq('location', 'walk_in').order('created_at'),
         ctx.supabase.from('walkin_visits').select('id, visit_date, checked_in_at, stations:centre_id(name)').eq('registration_id', regId).order('checked_in_at', { ascending: false }),
       ]);
@@ -54,6 +55,10 @@ export default async function Walkin({ params, searchParams }: { params: Promise
                 <li key={t.id} style={{ display: 'block' }}>
                   <div className="row-between"><span className="strong">{t.service_name}</span><span className="row"><SourceTag source={t.source} /><StatusBadge status={t.status} /></span></div>
                   <div className="small text2">{t.task_items.filter((i) => i.order_items.status === 'active').map((i) => i.order_items.test_name).join(', ') || 'No option selected yet'}</div>
+                  {!t.payment_cleared && ['not_attended', 'awaiting_choice'].includes(t.status) ? <div className="alert alert-warn small" style={{ marginTop: 6 }}>Add-on payment not verified yet — send the participant to the cashier before check-in.</div> : null}
+                  {['in_service', 'completed'].includes(t.status) ? t.task_items.filter((i) => i.order_items.status === 'active' && i.order_items.completion_rule === 'manual_confirm').map((i) => (
+                    <RpcForm key={i.order_items.id} eventId={eventId} rpc="confirm_order_item" back={back} ok={`${i.order_items.test_name} confirmed`} hidden={{ p_order_item: i.order_items.id, p_station: centre.id }} style={{ marginTop: 6 }}>
+                      <SubmitButton className="btn btn-ghost btn-sm">Confirm {i.order_items.test_name} done</SubmitButton></RpcForm>)) : null}
                   {t.external_accession ? <div className="small muted">Reference: <span className="mono">{t.external_accession}</span></div> : null}
                   {group && group.rule !== 'bundled' && ['awaiting_choice', 'not_attended'].includes(t.status) && ctx.can('choice.select') ? (
                     <RpcForm eventId={eventId} rpc="select_choice" back={back} ok="Choice recorded" hidden={{ p_reg: regId, p_group: group.id }} className="row" style={{ marginTop: 8 }}>
@@ -99,12 +104,13 @@ export default async function Walkin({ params, searchParams }: { params: Promise
     }
   }
 
+  const matches = at && sp.scan && !regId ? await searchRegistrations(ctx, sp.scan) : [];
   return (
     <>
       <PageHead title={centre ? centre.name : 'Walk-in centre'} meta="Walk-in services are never sent to event-day queues." />
       <DutyPicker stations={stations} base={base} title="Centre" current={at} />
       {centre ? <Card><ScanBox action={base} hidden={{ at: centre.id }} /></Card> : null}
-      {sp.scan && !regId ? <div className="alert alert-err">No registration found for that scan.</div> : null}
+      {centre && sp.scan && !regId ? <ScanMatches query={sp.scan} matches={matches} hrefFor={(id) => `${base}?at=${at}&reg=${id}`} /> : null}
       {panel}{pending}
     </>
   );

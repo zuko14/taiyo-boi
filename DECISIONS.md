@@ -30,6 +30,9 @@ Dated 10 Nov 2026 unless noted. “Provisional” means configurable and awaitin
 | B7 | No clinical priorities or fasting rules invented: all services priority 100, fasting off, no dependencies. Admin can set them once the Lab Partner approves. | template |
 | B8 | Code format `BOI-{F|M}-YYYY-NNNNNN`, counters per event + classification, editable prefix/format. | `events`, `package_code_counters` |
 | B9 | Payments are verified manually by a cashier with a reference/UTR; no gateway is claimed. Approved methods are an event setting and start **empty**. Maker-checker on by default. | `verify_payment` |
+| B11 | An add-on in the same workflow service as a package test (e.g. CA-125 with sample collection) stays its own task (keeps sponsored vs employee-paid separate) but is **completed in the same visit** when it is paid by then; the station screen lists it beforehand. Unpaid add-ons are not included and get their own visit after payment. | `task_action` (migration 009) |
+| B12 | The add-on desk only offers tests outside the participant's package; add-on-enabled tests already in the package are listed as “already free”. E.g. PSA/TFT/X-Ray are offered to Female participants only. | add-on desk |
+| B13 | A participant who walks up to a different station offering the same service can be taken over there (“Serve here instead”, waiting tickets only, audited). Ending the last shift at a station moves its waiting tickets. | `claim_task`, `end_staff_assignment` |
 | B10 | Reports: upload → validate (different person by default) → publish. Accession mismatch → `requires_review`. Only published reports reach the portal, after OTP. | `report_*` |
 
 ## Provisional (needs approval before production)

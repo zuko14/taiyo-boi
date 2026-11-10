@@ -7,7 +7,8 @@ import { requirePerm } from '@/lib/auth';
 import { nowMs } from '@/lib/clock';
 import { myStations } from '@/lib/duty';
 import { classLabel, inr, locationLabel } from '@/lib/format';
-import { resolveScan } from '@/lib/scan';
+import { ScanMatches } from '@/components/ScanMatches';
+import { resolveScan, searchRegistrations } from '@/lib/scan';
 import { idemKey } from '@/lib/supabase/server';
 import { createAddonOrder } from './actions';
 
@@ -41,6 +42,7 @@ export default async function AddonDesk({ params, searchParams }: { params: Prom
         && new Date(p.effective_from).getTime() <= now && (!p.effective_to || new Date(p.effective_to).getTime() > now))
         .sort((a, b) => +new Date(b.effective_from) - +new Date(a.effective_from))[0];
       const ordered = new Set((existing ?? []).map((e) => e.test_id));
+      const coveredByPackage = (catalog ?? []).filter((t) => inPkg.has(t.id));
       const offer = (catalog ?? []).filter((t) => !inPkg.has(t.id) && !ordered.has(t.id)).map((t) => ({ ...t, price: priceOf(t.id, t.location) }));
       const selected = ([] as string[]).concat(sp.t ?? []).filter((id) => offer.some((o) => o.id === id && o.price));
       const total = selected.reduce((n, id) => { const o = offer.find((x) => x.id === id)!; return n + o.price!.price_paise + o.price!.tax_paise; }, 0);
@@ -73,6 +75,8 @@ export default async function AddonDesk({ params, searchParams }: { params: Prom
                   <button className="btn btn-ghost" style={{ marginTop: 12 }}>Review total</button>
                 </form>
               ) : <Empty>No add-on tests available for this participant.</Empty>}
+              {coveredByPackage.length ? <p className="small muted" style={{ marginTop: 10 }}>Not offered because already free in this participant’s package: {coveredByPackage.map((t) => t.display_name).join(', ')}.</p> : null}
+              {ordered.size ? <p className="small muted" style={{ marginTop: 6 }}>Already ordered: {(catalog ?? []).filter((t) => ordered.has(t.id)).map((t) => t.display_name).join(', ')}.</p> : null}
             </Card>
             <Card title="Confirm with the participant">
               {sp.review && selected.length ? (
@@ -96,12 +100,13 @@ export default async function AddonDesk({ params, searchParams }: { params: Prom
     }
   }
 
+  const matches = desk && sp.scan && !regId ? await searchRegistrations(ctx, sp.scan) : [];
   return (
     <>
       <PageHead title="Add-on desk" meta="Optional tests outside the sponsored package, paid by the employee." />
       <DutyPicker stations={stations} base={base} title="Desk" current={desk} />
       {desk ? <Card><ScanBox action={base} hidden={{ at: desk }} /></Card> : null}
-      {sp.scan && !regId ? <div className="alert alert-err">No registration found for that scan.</div> : null}
+      {desk && sp.scan && !regId ? <ScanMatches query={sp.scan} matches={matches} hrefFor={(id) => `${base}?at=${desk}&reg=${id}`} /> : null}
       {body}
     </>
   );

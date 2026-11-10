@@ -120,7 +120,7 @@ The server validates these at first use (`src/lib/env.ts`) and reports missing n
 | Check | Result |
 |---|---|
 | Typecheck, lint, production build | pass |
-| Unit + integration (Vitest) | 46/46 pass |
+| Unit + integration (Vitest) | 53/53 pass |
 | E2E (Playwright, Chromium) | 1/1 pass |
 | Load: 500 registrations @10 parallel | 0 errors, p95 38 ms |
 | Load: 2,000 start/complete calls @10 parallel | 0 errors, p95 17 ms |
