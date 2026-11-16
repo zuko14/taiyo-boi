@@ -1,4 +1,4 @@
-import { AdminForm } from '@/components/AdminForm';
+import { AdminForm, isLive } from '@/components/AdminForm';
 import { RpcForm } from '@/components/RpcForm';
 import { SubmitButton } from '@/components/SubmitButton';
 import { Card, PageHead, StatusBadge } from '@/components/ui';
@@ -12,6 +12,7 @@ export default async function Staff({ params }: { params: Promise<{ eventId: str
   const ctx = await requirePerm(eventId, 'staff.manage', 'shift.assign');
   const tz = ctx.event.timezone;
   const back = `/e/${eventId}/admin/staff`;
+  const live = isLive(ctx.event.status);
   const [{ data: people }, { data: members }, { data: roles }, { data: stations }, { data: shifts }] = await Promise.all([
     ctx.supabase.rpc('staff_directory', { p_event: eventId }),
     ctx.supabase.from('event_memberships').select('id, user_id, role_code, active').eq('event_id', eventId),
@@ -54,7 +55,7 @@ export default async function Staff({ params }: { params: Promise<{ eventId: str
       {ctx.can('staff.manage') ? (
         <div className="grid grid-2">
           <Card title="Create staff account" sub="Use the person's work email. Share the initial password privately.">
-            <AdminForm action={createStaff} eventId={eventId} back={back} live={false}>
+            <AdminForm action={createStaff} eventId={eventId} back={back} live={live}>
               <div className="field"><label>Full name</label><input name="full_name" required /></div>
               <div className="field"><label>Email</label><input name="email" type="email" required /></div>
               <div className="field"><label>Initial password (min 12 characters)</label><input name="password" type="password" minLength={12} required autoComplete="new-password" /></div>
@@ -68,11 +69,11 @@ export default async function Staff({ params }: { params: Promise<{ eventId: str
                 <div className="row-between"><span><span className="strong">{p.full_name}</span> <span className="small muted">{p.email}</span></span></div>
                 <div className="row" style={{ marginTop: 6 }}>
                   {(members ?? []).filter((m) => m.user_id === p.user_id).map((m) => (
-                    <AdminForm key={m.id} action={setMembershipActive} eventId={eventId} back={back} live={false} hidden={{ id: m.id, active: m.active ? 'false' : 'true' }} className="row">
+                    <AdminForm key={m.id} action={setMembershipActive} eventId={eventId} back={back} live={live} hidden={{ id: m.id, active: m.active ? 'false' : 'true' }} className="row">
                       <span className={`badge ${m.active ? 'green' : ''}`}>{m.role_code.replace(/_/g, ' ')}</span>
                       {m.user_id !== ctx.user.id ? <button className="btn btn-ghost btn-sm">{m.active ? 'Deactivate' : 'Reactivate'}</button> : null}
                     </AdminForm>))}
-                  <AdminForm action={addRole} eventId={eventId} back={back} live={false} hidden={{ user_id: p.user_id }} className="row">
+                  <AdminForm action={addRole} eventId={eventId} back={back} live={live} hidden={{ user_id: p.user_id }} className="row">
                     <select name="role" className="input" style={{ width: 170, padding: '6px 10px' }} aria-label="Add role">{(roles ?? []).filter((r) => r.code !== 'event_admin' || ctx.can('permissions.manage')).map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}</select>
                     <button className="btn btn-ghost btn-sm">Add role</button>
                   </AdminForm>

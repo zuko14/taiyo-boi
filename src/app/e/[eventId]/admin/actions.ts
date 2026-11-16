@@ -6,11 +6,12 @@ import { bool, go, intOrNull, safePath, str, strOrNull } from '@/lib/flash';
 import { localInputToIso, toPaise } from '@/lib/format';
 import { createClient, serviceClient } from '@/lib/supabase/server';
 
-async function admin(fd: FormData) {
+async function admin(fd: FormData, defaultReason?: string) {
   const eventId = str(fd, 'event_id');
   const ctx = await getEventContext(eventId);
   const back = safePath(str(fd, 'back'), `/e/${eventId}`);
-  const db = await createClient(strOrNull(fd, 'reason'));    // reason reaches the audit trigger
+  const reason = strOrNull(fd, 'reason') || defaultReason || null;
+  const db = await createClient(reason);    // reason reaches the audit trigger
   const done = (error: { message: string; code?: string } | null, ok = 'Saved') => {
     if (error) go(back, 'err', friendlyError(error));
     revalidatePath(back.split('?')[0]);
@@ -160,7 +161,7 @@ export async function saveStation(fd: FormData) {
 }
 
 export async function createStaff(fd: FormData) {
-  const { eventId, ctx, db, back } = await admin(fd);
+  const { eventId, ctx, db, back } = await admin(fd, 'Staff account created');
   if (!ctx.can('staff.manage')) go(back, 'err', 'You do not have permission for this action.');
   const email = str(fd, 'email').toLowerCase(); const password = str(fd, 'password');
   if (password.length < 12) go(back, 'err', 'Initial password must be at least 12 characters.');
@@ -183,14 +184,14 @@ export async function createStaff(fd: FormData) {
 }
 
 export async function addRole(fd: FormData) {
-  const { eventId, ctx, db, done } = await admin(fd);
+  const { eventId, ctx, db, done } = await admin(fd, 'Staff role added');
   const { error } = await db.from('event_memberships').upsert({ event_id: eventId, user_id: str(fd, 'user_id'), role_code: str(fd, 'role'), active: true, created_by: ctx.user.id },
     { onConflict: 'event_id,user_id,role_code' });
   done(error, 'Role added');
 }
 
 export async function setMembershipActive(fd: FormData) {
-  const { db, done } = await admin(fd);
+  const { db, done } = await admin(fd, 'Staff membership updated');
   const { error } = await db.from('event_memberships').update({ active: bool(fd, 'active') }).eq('id', str(fd, 'id'));
   done(error, 'Membership updated');
 }
