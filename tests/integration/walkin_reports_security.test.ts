@@ -134,7 +134,8 @@ describe('isolation and audit', () => {
     expect(await rpcError(other.users.registration_staff.client.rpc('register_participant', {
       p_counter: fx.stations['REG-1'], p_idempotency_key: 'k', p_classification: 'female', p_full_name: 'x', p_consent: true })))
       .toMatch(/not_on_duty|permission_denied/);
-    const t = (await tasksOf(r.registration_id))[0];
+    // tasks share created_at within one transaction; pick the event-day one explicitly
+    const t = (await tasksOf(r.registration_id)).find((x) => x.location === 'event_day')!;
     expect(await rpcError(other.users.station_supervisor.client.rpc('task_action',
       { p_task: t.id, p_action: 'skip', p_reason: 'x' }))).toMatch(/permission_denied/);
     expect(await rpcError(other.users.event_admin.client.rpc('dashboard_overview', { p_event: fx.eventId }))).toMatch(/permission_denied/);

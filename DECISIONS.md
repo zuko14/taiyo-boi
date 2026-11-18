@@ -55,6 +55,18 @@ Dated 10 Nov 2026 unless noted. “Provisional” means configurable and awaitin
 - No offline mode: the documented paper fallback applies (see runbook).
 - `.env.example` was not created because a local guardrail blocks writing `.env*` files; variables are documented in the README.
 
+## 2026-11-18 — event lifecycle, custom packages, camera scanning
+
+- **Package mode** (`events.settings.package_mode`): `female_male` for events created from the Bank of India brochure template (exactly two packages, rates backend-only, unchanged behaviour); `custom` for every other camp, where the Event Admin creates any number of packages (`create_package` / `delete_package`). A package's classification slug is its lowercased code; registration codes use the package's code letter, now unique per event.
+- **Package price (custom events)** is what the participant pays (`packages.price_paise`, blank/0 = free). Registration snapshots it into the package order and creates one payment; all package tasks carry that payment, so the queue and walk-in check-in wait until a cashier verifies it (or it is waived / a supervised exception). Package payments cannot be "cancelled" like add-ons; a refund leaves performed work recorded. Female/Male (BOI) packages can never carry a participant price.
+- **Lab UPI QR**: the admin enters the lab's UPI ID (settings `upi_vpa`, `upi_payee_name`). Desks, the cashier screen and the participant portal show a `upi://pay` QR with the exact amount and the registration code as note. A static UPI ID gives no payment callback, so **payment is not auto-confirmed**: the cashier verifies by UTR (or cash count). Automatic confirmation needs a payment-gateway account (webhook) — not integrated.
+- **Revenue insights** (`revenue_insights`, `finance.view`): verified transactions minus refunds only — never orders or displayed QRs — with packages vs add-ons, method, hourly timeline, top items and cashier. `addon_revenue` is now strictly add-on orders so package money never inflates it.
+- **Pilot reset** (`reset_event`, permission `event.reset`, typed event code + reason): deletes all participant/operational data and report files, keeps configuration, staff and audit log, closes stations, clears shifts, restarts codes, sets status Draft.
+- **Event delete** (`delete_event`, platform admin only, not while live): removes the event, its configuration and its audit rows; a platform-level `event.delete` audit row (event_id null) keeps code/name.
+- Append-only tables can be emptied only inside these purge functions (transaction-local `app.purge` flag).
+- **Catalogue delete** (`delete_test`): allowed only while no participant order references the test; also removes it from packages and add-on prices. Otherwise archive.
+- **Camera scanning**: every scan box has a Camera button. Android Chrome uses the native BarcodeDetector (QR + Code 128); other browsers (iOS Safari, Firefox) fall back to jsQR (QR only). Requires HTTPS. `Permissions-Policy` now allows `camera=(self)`.
+
 ## Open approvals (CLAUDE.md §20 highest priority)
 
 1. Lab Partner approval of catalogue, order codes, and test→visit grouping.

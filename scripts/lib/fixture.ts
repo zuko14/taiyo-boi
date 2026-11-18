@@ -88,7 +88,7 @@ export async function buildEvent(opts: { code: string; name?: string; emailDomai
   await must(a.from('events').update({
     venue: 'Synthetic venue', help_contact: 'Help desk at entrance (synthetic)',
     settings: { require_consent: true, payment_maker_checker: true, report_maker_checker: true,
-      payment_methods: ['cash', 'upi_manual'], portal_otp_required: true, default_service_minutes: 5, grouping_approved: false },
+      payment_methods: ['cash', 'upi_manual'], portal_otp_required: true, default_service_minutes: 5, grouping_approved: false, package_mode: 'female_male' },
   }).eq('id', eventId));
 
   const services = Object.fromEntries((await must<{ id: string; code: string }[]>(

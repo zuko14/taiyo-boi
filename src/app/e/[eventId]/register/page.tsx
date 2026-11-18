@@ -5,7 +5,7 @@ import { SubmitButton } from '@/components/SubmitButton';
 import { Card, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
 import { myStations } from '@/lib/duty';
-import { classLabel, dt } from '@/lib/format';
+import { classLabel, dt, inr } from '@/lib/format';
 import { idemKey } from '@/lib/supabase/server';
 import { registerParticipant } from './actions';
 
@@ -18,7 +18,7 @@ export default async function RegisterPage({ params, searchParams }: { params: P
   const { stations } = await myStations(ctx, ['registration_counter']);
   const counter = sp.at ?? (stations.length === 1 ? stations[0].id : undefined);
   const base = `/e/${eventId}/register`;
-  const { data: packages } = await ctx.supabase.from('packages').select('id, classification, name, active').eq('event_id', eventId).order('classification');
+  const { data: packages } = await ctx.supabase.from('packages').select('id, classification, name, active, price_paise').eq('event_id', eventId).order('classification');
   const canOverride = ctx.can('registration.classification_override');
   const requireConsent = ctx.event.settings.require_consent !== false;
 
@@ -61,14 +61,14 @@ export default async function RegisterPage({ params, searchParams }: { params: P
               <input type="hidden" name="event_id" value={eventId} /><input type="hidden" name="counter" value={counter} />
               <input type="hidden" name="idem" value={await idemKey()} />
               <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
-                <legend className="label" style={{ marginBottom: 8 }}>Classification (required)</legend>
+                <legend className="label" style={{ marginBottom: 8 }}>{ctx.event.settings.package_mode === 'female_male' ? 'Classification' : 'Package'} (required)</legend>
                 <div className="choice-cards">
                   {(packages ?? []).map((p) => (
                     <label key={p.id} className="choice-card">
                       <input type="radio" name="classification" value={p.classification} required disabled={!p.active} />
                       <span className="title">{classLabel(p.classification)}</span>
                       <span className="small text2">{p.name}</span>
-                      <span className="small muted">Sponsored · employee pays ₹0</span>
+                      <span className="small muted">{p.price_paise ? `Participant pays ${inr(p.price_paise)}` : ctx.event.settings.package_mode === 'female_male' ? 'Sponsored · employee pays ₹0' : 'Free for the participant'}</span>
                     </label>
                   ))}
                 </div>

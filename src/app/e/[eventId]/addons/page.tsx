@@ -3,6 +3,7 @@ import { DutyPicker } from '@/components/DutyPicker';
 import { ScanBox } from '@/components/ScanBox';
 import { SubmitButton } from '@/components/SubmitButton';
 import { Card, Empty, PageHead, SourceTag, StatusBadge } from '@/components/ui';
+import { UpiPay } from '@/components/UpiPay';
 import { requirePerm } from '@/lib/auth';
 import { nowMs } from '@/lib/clock';
 import { myStations } from '@/lib/duty';
@@ -54,12 +55,14 @@ export default async function AddonDesk({ params, searchParams }: { params: Prom
           <Card title={`${reg.registration_code} · ${p.full_name}`} sub={`${classLabel(reg.classification)} · ${(reg.packages as unknown as { name: string }).name}`}
             actions={<Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/participants/${regId}`}>Participant</Link>}>
             {reg.status !== 'active' ? <div className="alert alert-err">This registration is {reg.status}.</div> : null}
-            <div className="label" style={{ marginBottom: 8 }}>Included in the sponsored package (no charge) <SourceTag source="package" /></div>
+            <div className="label" style={{ marginBottom: 8 }}>{ctx.event.settings.package_mode !== 'female_male' ? 'Included in the package' : 'Included in the sponsored package (no charge)'} <SourceTag source="package" custom={ctx.event.settings.package_mode !== 'female_male'} /></div>
             <div className="row small" style={{ gap: 6 }}>{snap.tests.map((t) => <span key={t.test_id} className="badge plain">{t.name}</span>)}</div>
           </Card>
           {sp.order ? (
             <Card title="Order created" className="">
               <div className="alert alert-warn">Payment pending. The add-on test will only be queued after an authorised cashier verifies the payment.</div>
+              {(() => { const i = (intents ?? []).find((x) => x.order_id === sp.order && ['pending', 'requires_review'].includes(x.status));
+                return i ? <UpiPay settings={ctx.event.settings} amountPaise={i.amount_paise} reference={reg.registration_code} /> : null; })()}
               {instructions ? <p className="text2">{instructions}</p> : <p className="muted small">No payment instructions configured for this event.</p>}
             </Card>
           ) : null}
@@ -103,7 +106,7 @@ export default async function AddonDesk({ params, searchParams }: { params: Prom
   const matches = desk && sp.scan && !regId ? await searchRegistrations(ctx, sp.scan) : [];
   return (
     <>
-      <PageHead title="Add-on desk" meta="Optional tests outside the sponsored package, paid by the employee." />
+      <PageHead title="Add-on desk" meta={ctx.event.settings.package_mode !== 'female_male' ? 'Optional tests outside the participant\'s package, paid by the participant.' : 'Optional tests outside the sponsored package, paid by the employee.'} />
       <DutyPicker stations={stations} base={base} title="Desk" current={desk} />
       {desk ? <Card><ScanBox action={base} hidden={{ at: desk }} /></Card> : null}
       {desk && sp.scan && !regId ? <ScanMatches query={sp.scan} matches={matches} hrefFor={(id) => `${base}?at=${desk}&reg=${id}`} /> : null}

@@ -6,7 +6,7 @@ import { Card, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
 import { isoToLocalInput } from '@/lib/format';
 import { labelSettings } from '@/lib/label';
-import { saveEventProfile, saveEventSettings } from '../actions';
+import { deleteEvent, resetEvent, saveEventProfile, saveEventSettings } from '../actions';
 
 const NEXT: Record<string, string[]> = { draft: ['ready', 'live'], ready: ['draft', 'live'], live: ['paused', 'closed'], paused: ['live', 'closed'], closed: ['live', 'archived'], archived: [] };
 
@@ -94,6 +94,12 @@ export default async function EventAdmin({ params }: { params: Promise<{ eventId
               <label className="check"><input type="checkbox" name="payment_methods" value="upi_manual" defaultChecked={methods.includes('upi_manual')} />UPI — manual check of settlement/UTR</label>
               <div className="field"><label>Other method codes (comma-separated)</label><input name="payment_methods_extra" defaultValue={methods.filter((m) => !['cash', 'upi_manual'].includes(m)).join(', ')} /></div>
               <div className="field"><label>Payment instructions shown at the add-on desk</label><textarea name="payment_instructions" rows={2} defaultValue={String(s.payment_instructions ?? '')} /></div>
+              <div className="label" style={{ marginTop: 6 }}>Lab&apos;s UPI collection (optional)</div>
+              <div className="form-row">
+                <div className="field"><label htmlFor="upi_vpa">UPI ID (VPA) printed with the lab&apos;s QR</label><input id="upi_vpa" name="upi_vpa" defaultValue={String(s.upi_vpa ?? '')} placeholder="labname@okicici" autoComplete="off" /></div>
+                <div className="field"><label htmlFor="upi_payee_name">Payee name</label><input id="upi_payee_name" name="upi_payee_name" defaultValue={String(s.upi_payee_name ?? '')} placeholder="Lab legal name" /></div>
+              </div>
+              <span className="help">Desks, the cashier screen and the participant&apos;s phone then show a UPI QR with the exact amount and the registration code. Enable &ldquo;UPI — manual check&rdquo; above so the cashier can confirm payments by UTR.</span>
             </div>
           </div>
           <div className="label" style={{ marginTop: 6 }}>Tag label</div>
@@ -105,6 +111,29 @@ export default async function EventAdmin({ params }: { params: Promise<{ eventId
           <SubmitButton>Save settings</SubmitButton>
         </AdminForm>
       </Card>
+
+      {ctx.can('event.reset') || ctx.profile.is_platform_admin ? (
+        <Card title="Danger zone" sub="Use after a pilot or mock run so the same event can be used for the real camp.">
+          <div className="grid grid-2">
+            {ctx.can('event.reset') ? (
+              <form action={resetEvent}>
+                <input type="hidden" name="event_id" value={eventId} />
+                <div className="strong">Reset event (pilot / test run)</div>
+                <p className="small text2">Permanently deletes every participant, registration, tag, add-on order, payment, receipt, queue, attendance record and report file. Packages, tests, prices, stations, staff and permissions are kept. Stations are closed, shifts are cleared, registration codes restart at 1 and the event returns to <strong>Draft</strong>. The audit log keeps a record of the reset.</p>
+                <div className="field"><label htmlFor="rs-reason">Reason</label><input id="rs-reason" name="reason" required placeholder="e.g. Pilot run at the apartment camp finished" /></div>
+                <div className="field"><label htmlFor="rs-confirm">Type <span className="mono">{e.code}</span> to confirm</label><input id="rs-confirm" name="confirm" required autoComplete="off" /></div>
+                <SubmitButton className="btn btn-red" confirm={`Reset ${e.code}? All participant and operational data will be deleted. This cannot be undone.`}>Reset event data</SubmitButton>
+              </form>) : null}
+            {ctx.profile.is_platform_admin ? (
+              <form action={deleteEvent}>
+                <input type="hidden" name="event_id" value={eventId} /><input type="hidden" name="back" value={back} />
+                <div className="strong">Delete event</div>
+                <p className="small text2">Permanently removes this event, all of its data and its configuration. Platform admin only. A live event must be paused or closed first.</p>
+                <div className="field"><label htmlFor="del-confirm">Type <span className="mono">{e.code}</span> to confirm</label><input id="del-confirm" name="confirm" required autoComplete="off" /></div>
+                <SubmitButton className="btn btn-red" confirm={`Permanently delete ${e.code}? This cannot be undone.`}>Delete event permanently</SubmitButton>
+              </form>) : null}
+          </div>
+        </Card>) : null}
     </>
   );
 }

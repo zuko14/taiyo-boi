@@ -357,3 +357,58 @@ tr.selected { background: var(--accent-soft2); }
 @media (max-width: 560px) { .choice-cards { grid-template-columns: 1fr; } }
 @media (max-width: 480px) { .stat { flex-basis: 100%; } }
 @media (min-width: 1441px) { .main-inner { max-width: 1400px; } }
+
+/* ---------- camera scanner (phones/tablets) */
+.cam-btn { gap: 8px; }
+.cam-btn svg { width: 18px; height: 18px; }
+.cam-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(2, 8, 14, 0.94); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px; padding: 16px; }
+.cam-frame { position: relative; width: min(100%, 520px); max-height: 62vh; aspect-ratio: 3 / 4; border-radius: 16px; overflow: hidden; background: #000; border: 1px solid var(--border2); }
+.cam-frame video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-target { position: absolute; inset: 18%; border: 3px solid var(--accent); border-radius: 14px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35); }
+.cam-hint { color: #E6F1EE; text-align: center; max-width: 520px; margin: 0; }
+@media (max-width: 640px) {
+  .scan { flex-wrap: wrap; }
+  .scan .search-bar { flex-basis: 100% !important; min-width: 0 !important; }
+  .scan > .cam-btn, .scan > .btn-solid { flex: 1; min-height: 48px; justify-content: center; }
+}
+
+/* ---------- UPI collection QR */
+.upi-pay { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.upi-qr { width: 180px; height: 180px; padding: 10px; background: #fff; border-radius: 12px; flex: none; }
+.upi-qr svg { width: 100%; height: 100%; display: block; }
+.upi-info { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 6px; }
+.upi-amount { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.02em; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+.upi-open { align-self: flex-start; }
+@media (min-width: 900px) { .upi-open { display: none; } }   /* deep link only helps on the phone itself */
+
+/* ---------- revenue insights (reference palette slots 1–2, stepped per theme) */
+.viz { --series-1: #3987e5; --series-2: #d95926; }
+[data-theme="light"] .viz { --series-1: #2a78d6; --series-2: #eb6834; }
+.viz-s1 { fill: var(--series-1); background: var(--series-1); }
+.viz-s2 { fill: var(--series-2); background: var(--series-2); }
+.viz-svg { width: 100%; height: auto; display: block; }
+.viz-grid { stroke: var(--border); stroke-width: 1; }
+.viz-axis { stroke: var(--border2); stroke-width: 1; }
+.viz-tick { fill: var(--text3); font-size: 14px; font-variant-numeric: tabular-nums; }
+.viz-hit:hover path { filter: brightness(1.18); }
+.rev-hero { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.hero-num { font-size: clamp(2.4rem, 6vw, 3.4rem); font-weight: 750; letter-spacing: -0.035em; color: var(--text-strong); font-variant-numeric: tabular-nums; line-height: 1.1; margin: 4px 0 6px; }
+.rev-gauge { position: relative; width: 120px; height: 120px; flex: none; }
+.rev-gauge svg { width: 100%; height: 100%; }
+.viz-track { fill: none; stroke: var(--surface3); stroke-width: 10; }
+.viz-ring { fill: none; stroke: var(--series-1); stroke-width: 10; stroke-linecap: round; }
+.rev-gauge-num { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.rev-gauge-num strong { font-size: 1.5rem; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+.split { display: flex; gap: 2px; height: 18px; border-radius: 6px; overflow: hidden; margin: 6px 0 14px; }
+.split-seg { min-width: 4px; }
+.legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.legend li { display: grid; grid-template-columns: 14px auto 1fr; gap: 4px 10px; align-items: center; }
+.legend li .small { grid-column: 2 / -1; }
+.swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.rank-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.rank-name { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.rank-val { color: var(--text-strong); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rank-track { height: 8px; border-radius: 4px; background: var(--surface2); margin: 6px 0 4px; overflow: hidden; }
+.rank-fill { height: 100%; border-radius: 4px; background: var(--series-1); }

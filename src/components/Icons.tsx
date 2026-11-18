@@ -21,6 +21,7 @@ const P: Record<string, string> = {
   wallet: 'M20 7H5a2 2 0 0 1 0-4h14v4M3 5v14a2 2 0 0 0 2 2h15V7M16 14h.01',
   zap: 'M13 2 3 14h9l-1 8 10-12h-9z',
   scan: 'M3 7V3h4M17 3h4v4M21 17v4h-4M7 21H3v-4M7 12h10',
+  camera: 'M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8',
   printer: 'M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z',
   check: 'M20 6 9 17l-5-5',
   clock: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 6v6l4 2',
@@ -42,14 +43,15 @@ export function Icon({ name, lg, label }: { name: IconName; lg?: boolean; label?
   );
 }
 
-/** Kriya mark (ui_ux.txt §1.1). Always shown with the wordmark. */
+/** Kriya mark (ui_ux.txt §1.1). Always shown with the wordmark.
+ * Gradients use userSpaceOnUse: the stem is a zero-width line, so a bounding-box gradient would not paint it. */
 export function KriyaMark() {
   return (
     <svg viewBox="0 0 32 32" aria-hidden="true">
       <defs>
-        <linearGradient id="km-hex" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#43E2A6" /><stop offset="1" stopColor="#3D8BFD" /></linearGradient>
-        <linearGradient id="km-stem" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#43E2A6" /><stop offset="1" stopColor="#0C9668" /></linearGradient>
-        <linearGradient id="km-arm" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stopColor="#3D8BFD" /><stop offset=".5" stopColor="#2FA8D8" /><stop offset="1" stopColor="#43E2A6" /></linearGradient>
+        <linearGradient id="km-hex" gradientUnits="userSpaceOnUse" x1="4" y1="2" x2="28" y2="30"><stop offset="0" stopColor="#43E2A6" /><stop offset="1" stopColor="#3D8BFD" /></linearGradient>
+        <linearGradient id="km-stem" gradientUnits="userSpaceOnUse" x1="0" y1="7.6" x2="0" y2="24.4"><stop offset="0" stopColor="#43E2A6" /><stop offset="1" stopColor="#0C9668" /></linearGradient>
+        <linearGradient id="km-arm" gradientUnits="userSpaceOnUse" x1="0" y1="24.4" x2="0" y2="7.6"><stop offset="0" stopColor="#3D8BFD" /><stop offset=".5" stopColor="#2FA8D8" /><stop offset="1" stopColor="#43E2A6" /></linearGradient>
       </defs>
       <path d="M16 2.2 27.9 9v13.6L16 29.4 4.1 22.6V9z" fill="none" stroke="url(#km-hex)" strokeOpacity=".4" strokeWidth="1.2" />
       <path d="M11.2 7.6v16.8" stroke="url(#km-stem)" strokeWidth="3.6" strokeLinecap="round" />

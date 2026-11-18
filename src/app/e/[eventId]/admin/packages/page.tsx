@@ -2,8 +2,9 @@ import { AdminForm, isLive } from '@/components/AdminForm';
 import { SubmitButton } from '@/components/SubmitButton';
 import { Card, PageHead } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
-import { classLabel, locationLabel } from '@/lib/format';
-import { addPackageTest, removePackageTest, saveChoiceGroup, savePackage, savePackageTest, saveService } from '../actions';
+import Link from 'next/link';
+import { classLabel, inr, locationLabel } from '@/lib/format';
+import { addPackageTest, createPackage, deletePackage, removePackageTest, saveChoiceGroup, savePackage, savePackageTest, saveService, setPackageRate } from '../actions';
 
 type Svc = { id: string; code: string; name: string; location: string; priority: number; est_minutes: number | null; instructions: string; active: boolean };
 
@@ -13,6 +14,7 @@ export default async function Packages({ params }: { params: Promise<{ eventId: 
   const back = `/e/${eventId}/admin/packages`;
   const live = isLive(ctx.event.status);
   const canPkg = ctx.can('package.edit'); const canMap = ctx.can('package.test_mapping.edit');
+  const custom = (ctx.event.settings.package_mode ?? 'custom') !== 'female_male';
   const [{ data: pkgs }, { data: pts }, { data: tests }, { data: groups }, { data: services }, { data: map }, { data: checks }] = await Promise.all([
     ctx.supabase.from('packages').select('*').eq('event_id', eventId).order('classification'),
     ctx.supabase.from('package_tests').select('*').eq('event_id', eventId),
@@ -28,7 +30,25 @@ export default async function Packages({ params }: { params: Promise<{ eventId: 
 
   return (
     <>
-      <PageHead title="Packages & services" meta="Exactly two sponsored packages (Female / Male). Changes apply to new registrations; existing ones keep their snapshot." />
+      <PageHead title="Packages & services" meta={custom
+        ? 'Create the packages offered at this camp, choose their tests and set prices. Changes apply to new registrations; existing ones keep their snapshot.'
+        : 'Exactly two sponsored packages (Female / Male). Changes apply to new registrations; existing ones keep their snapshot.'}>
+        <Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/admin/catalog`}>Test catalogue</Link>
+        {ctx.can('addon.price.edit') ? <Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/admin/prices`}>Add-on prices</Link> : null}
+      </PageHead>
+      {custom && canPkg ? (
+        <Card title="Create a package" sub="Then add tests from the catalogue to it. Create any missing tests in the Test catalogue first.">
+          <AdminForm action={createPackage} eventId={eventId} back={back} live={live}>
+            <div className="form-row">
+              <div className="field" style={{ flex: 2 }}><label>Package name</label><input name="name" required maxLength={120} placeholder="e.g. Executive Health Check" /></div>
+              <div className="field"><label>Package code</label><input name="code" required pattern="[A-Za-z0-9_]{1,30}" placeholder="EXEC" title="Letters, digits and _ only" /></div>
+              <div className="field"><label>Code letter (in registration codes)</label><input name="code_letter" required pattern="[A-Za-z]{1,3}" maxLength={3} placeholder="E" /></div>
+            </div>
+            <div className="field"><label>Description</label><input name="description" /></div>
+            <SubmitButton className="btn btn-solid btn-sm">Create package</SubmitButton>
+          </AdminForm>
+        </Card>) : null}
+      {!(pkgs ?? []).length ? <div className="alert alert-info">No packages yet.{custom ? ' Create one above.' : ''}</div> : null}
       {(checks ?? []).filter((c: { level: string }) => c.level === 'error').map((c: { message: string }, i: number) => <div key={i} className="alert alert-err">{c.message}</div>)}
       {(pkgs ?? []).map((p) => {
         const lines = (pts ?? []).filter((x) => x.package_id === p.id);
@@ -38,7 +58,8 @@ export default async function Packages({ params }: { params: Promise<{ eventId: 
         for (const l of plain) { const k = svcName(svcOfTest(l.test_id)) ?? 'UNMAPPED'; plan.set(k, [...(plan.get(k) ?? []), test(l.test_id)?.display_name ?? '?']); }
         for (const g of pg) plan.set(`${svcName(g.service_id)} (choice: ${g.name})`, lines.filter((l) => l.choice_group_id === g.id).map((l) => test(l.test_id)?.display_name ?? '?'));
         return (
-          <Card key={p.id} title={`${classLabel(p.classification)} · ${p.name}`} sub={`Registration codes use letter “${p.code_letter}”. Employee charge: ₹0.`}>
+          <Card key={p.id} title={custom ? `${p.name} · ${p.code}` : `${classLabel(p.classification)} · ${p.name}`}
+            sub={`Registration codes use letter “${p.code_letter}”. ${custom ? (p.price_paise ? `Participant pays ${inr(p.price_paise)} (collected at registration).` : 'Free for the participant.') : 'Employee charge: ₹0.'}${!p.active ? ' Inactive.' : ''}`}>
             <div className="grid grid-2">
               <div>
                 <div className="label" style={{ marginBottom: 8 }}>Task plan preview (one queue stop per service)</div>
@@ -54,6 +75,16 @@ export default async function Packages({ params }: { params: Promise<{ eventId: 
                   <label className="check"><input type="checkbox" name="active" defaultChecked={p.active} />Active</label>
                   {canPkg ? <SubmitButton className="btn btn-ghost btn-sm">Save package</SubmitButton> : null}
                 </AdminForm>
+                {custom && canPkg ? (<>
+                  <AdminForm action={setPackageRate} eventId={eventId} back={back} live={live} hidden={{ id: p.id }} className="row" style={{ marginTop: 12, alignItems: 'flex-end' }}>
+                    <div className="field" style={{ flex: 1, marginBottom: 0 }}><label>Price paid by the participant (₹, blank or 0 = free)</label>
+                      <input name="price" inputMode="decimal" placeholder="free" defaultValue={p.price_paise ? String(p.price_paise / 100) : ''} /></div>
+                    <SubmitButton className="btn btn-ghost btn-sm">Save price</SubmitButton>
+                  </AdminForm>
+                  <AdminForm action={deletePackage} eventId={eventId} back={back} live={live} hidden={{ id: p.id }} style={{ marginTop: 12 }}>
+                    <SubmitButton className="btn btn-red btn-sm" confirm={`Delete package ${p.name}? Only possible while nobody is registered on it.`}>Delete package</SubmitButton>
+                  </AdminForm>
+                </>) : null}
               </div>
               <div>
                 <div className="label" style={{ marginBottom: 8 }}>Package tests</div>
@@ -83,6 +114,7 @@ export default async function Packages({ params }: { params: Promise<{ eventId: 
                     <select name="choice_group_id" className="input" style={{ width: 170 }} aria-label="Choice group"><option value="">Standalone</option>{pg.map((g) => <option key={g.id} value={g.id}>Option in {g.name}</option>)}</select>
                     <SubmitButton className="btn btn-ghost btn-sm">Add</SubmitButton>
                   </AdminForm>) : null}
+                {canMap ? <p className="small muted" style={{ marginTop: 6 }}>Test missing? <Link href={`/e/${eventId}/admin/catalog`}>Create it in the test catalogue</Link> and map it to a workflow service, then add it here.</p> : null}
                 <div className="label" style={{ margin: '16px 0 8px' }}>Choice groups</div>
                 {pg.map((g) => (
                   <AdminForm key={g.id} action={saveChoiceGroup} eventId={eventId} back={back} live={live} hidden={{ id: g.id, package_id: p.id, code: g.code }} style={{ marginBottom: 12 }}>

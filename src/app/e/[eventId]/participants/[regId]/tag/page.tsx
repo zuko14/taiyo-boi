@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation';
 import { RpcForm } from '@/components/RpcForm';
 import { SubmitButton } from '@/components/SubmitButton';
 import { Card, PageHead } from '@/components/ui';
+import { UpiPay } from '@/components/UpiPay';
+import { inr } from '@/lib/format';
 import { requirePerm } from '@/lib/auth';
 import { labelSettings } from '@/lib/label';
 import { TagPrinter } from './TagPrinter';
@@ -14,6 +16,9 @@ export default async function TagPage({ params }: { params: Promise<{ eventId: s
     .eq('id', regId).eq('event_id', eventId).maybeSingle();
   if (!reg) notFound();
   const p = reg.participants as unknown as { full_name: string; age: number | null };
+  // registration staff can read orders (participant.view), not payments; the package order holds the price snapshot
+  const { data: pkgOrder } = await ctx.supabase.from('orders').select('total_paise').eq('registration_id', regId).eq('kind', 'package').eq('status', 'active').maybeSingle();
+  const due = pkgOrder?.total_paise ?? 0;
   const l = labelSettings(ctx.event.settings);
   const isReprint = reg.tag_version > 0;
   const back = `/e/${eventId}/participants/${regId}/tag`;
@@ -23,6 +28,10 @@ export default async function TagPage({ params }: { params: Promise<{ eventId: s
         <Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/participants/${regId}`}>Participant</Link>
         <Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/register`}>Next registration</Link>
       </PageHead></div>
+      {due > 0 ? (
+        <Card className="no-print" title={`Package payment due · ${inr(due)}`} sub="Collect by the lab's UPI QR or cash. The participant's tests are queued once a cashier verifies the payment on the Payments page.">
+          <UpiPay settings={ctx.event.settings} amountPaise={due} reference={reg.registration_code} />
+        </Card>) : null}
       <Card className="no-print" title={isReprint ? `Tag v${reg.tag_version} already issued` : 'Print the participant tag'}
         sub="If printing fails, the registration is safe: reprint with a reason. Check the label before attaching it.">
         {isReprint && !ctx.can('tag.reprint') ? <div className="alert alert-warn">A supervisor must reprint this tag.</div> : (

@@ -60,3 +60,15 @@ describe('label settings', () => {
     expect(labelSettings({ label: { width_mm: 100, height_mm: 50, show_age: false } })).toEqual({ w: 100, h: 50, showAge: false });
   });
 });
+
+import { upiLink, upiPayee } from '@/lib/upi';
+describe('upi', () => {
+  it('builds an NPCI pay link with exact amount, literal @ and %20 spaces', () => {
+    const p = upiPayee({ upi_vpa: 'lab.pay@okicici', upi_payee_name: 'Taiyo Labs Pvt Ltd' })!;
+    expect(upiLink(p, 49950, 'BOI-B-2026-000001')).toBe('upi://pay?pa=lab.pay@okicici&pn=Taiyo%20Labs%20Pvt%20Ltd&am=499.50&cu=INR&tn=BOI-B-2026-000001');
+  });
+  it('rejects malformed UPI IDs', () => {
+    expect(upiPayee({ upi_vpa: 'not a vpa' })).toBeNull();
+    expect(upiPayee({})).toBeNull();
+  });
+});

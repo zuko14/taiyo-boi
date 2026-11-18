@@ -103,10 +103,10 @@ export default async function ParticipantDetail({ params }: { params: Promise<{ 
 
       <div className="grid grid-2">
         <div>
-          <Card title="Sponsored package" sub={<><SourceTag source="package" /> <span className="small muted">Snapshot of the package at registration</span></>}>
+          <Card title={ctx.event.settings.package_mode !== 'female_male' ? 'Package' : 'Sponsored package'} sub={<><SourceTag source="package" custom={ctx.event.settings.package_mode !== 'female_male'} /> <span className="small muted">Snapshot of the package at registration</span></>}>
             <ul className="list">{pkgTasks.map(taskRow)}</ul>
           </Card>
-          <Card title="Add-on tests" sub={<SourceTag source="addon" />} actions={ctx.can('addon.create') ? <Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/addons?reg=${regId}`}>Add tests</Link> : null}>
+          <Card title="Add-on tests" sub={<SourceTag source="addon" custom={ctx.event.settings.package_mode !== 'female_male'} />} actions={ctx.can('addon.create') ? <Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/addons?reg=${regId}`}>Add tests</Link> : null}>
             {addonTasks.length ? <ul className="list">{addonTasks.map(taskRow)}</ul> : <p className="muted small">No add-ons.</p>}
             {payments.data?.length ? (<><div className="hr" /><div className="label">Payments</div><ul className="list">
               {payments.data.map((i) => (

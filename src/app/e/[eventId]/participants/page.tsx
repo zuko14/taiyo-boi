@@ -26,12 +26,13 @@ export default async function Participants({ params, searchParams }: { params: P
 
   let query = ctx.supabase.from('registration_overview').select('*', { count: 'exact' }).eq('event_id', eventId)
     .order('created_at', { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
-  if (sp.cls === 'female' || sp.cls === 'male') query = query.eq('classification', sp.cls);
+  if (sp.cls && /^[a-z0-9_]{1,30}$/.test(sp.cls)) query = query.eq('classification', sp.cls);
   if (q) {
     const safe = q.replace(/[%,()]/g, ' ').toLowerCase().replace(/\s+/g, ' ');
     query = query.or(`registration_code.ilike.%${safe}%,name_search.ilike.%${safe}%,employee_id.ilike.%${safe}%,mobile.ilike.%${safe}%`);
   }
-  const { data: rows, count } = await query;
+  const [{ data: rows, count }, { data: pkgs }] = await Promise.all([query,
+    ctx.supabase.from('packages').select('classification, name').eq('event_id', eventId).order('classification')]);
 
   return (
     <>
@@ -41,7 +42,7 @@ export default async function Participants({ params, searchParams }: { params: P
           <div className="search-bar" style={{ flex: 1, minWidth: 240 }}><Icon name="search" />
             <input name="q" defaultValue={q} placeholder="Scan tag, or search code / name / employee ID / mobile" aria-label="Search participants" autoFocus /></div>
           <select name="cls" defaultValue={sp.cls ?? ''} className="input" style={{ width: 160 }} aria-label="Classification">
-            <option value="">All packages</option><option value="female">Female</option><option value="male">Male</option></select>
+            <option value="">All packages</option>{(pkgs ?? []).map((p) => <option key={p.classification} value={p.classification}>{classLabel(p.classification)} · {p.name}</option>)}</select>
           <button className="btn btn-ghost">Search</button>
         </form>
         <p className="small muted" style={{ margin: '10px 0 0' }}>Similar names are listed, never auto-selected — confirm the code with the participant.</p>

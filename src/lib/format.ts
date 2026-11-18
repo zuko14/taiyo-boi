@@ -55,5 +55,6 @@ const STATUS: Record<string, [string, Tone]> = {
 
 export const statusLabel = (s: string) => STATUS[s]?.[0] ?? s.replace(/_/g, ' ');
 export const statusTone = (s: string): Tone => STATUS[s]?.[1] ?? '';
-export const classLabel = (c: string) => (c === 'female' ? 'Female' : c === 'male' ? 'Male' : c);
+export const classLabel = (c: string) => (c === 'female' ? 'Female' : c === 'male' ? 'Male'
+  : c.replace(/_/g, ' ').replace(/^./, (x) => x.toUpperCase()));
 export const locationLabel = (l: string) => (l === 'walk_in' ? 'Walk-in centre' : 'Event day');

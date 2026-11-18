@@ -5,10 +5,10 @@ export function StatusBadge({ status, label }: { status: string; label?: string 
   return <span className={`badge ${statusTone(status)}`}>{label ?? statusLabel(status)}</span>;
 }
 
-export function SourceTag({ source }: { source: string }) {
+export function SourceTag({ source, custom }: { source: string; custom?: boolean }) {
   return source === 'addon'
-    ? <span className="badge plain tag-addon">Add-on · employee-paid</span>
-    : <span className="badge plain tag-sponsor">Sponsored · ₹0</span>;
+    ? <span className="badge plain tag-addon">Add-on · {custom ? 'participant-paid' : 'employee-paid'}</span>
+    : <span className="badge plain tag-sponsor">{custom ? 'Package test' : 'Sponsored · ₹0'}</span>;
 }
 
 export function Stat({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: ReactNode; tone?: 'warn' | 'bad' }) {

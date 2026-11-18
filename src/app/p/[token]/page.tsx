@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { KriyaMark, Icon } from '@/components/Icons';
 import { LiveRefresh } from '@/components/LiveRefresh';
 import { StatusBadge } from '@/components/ui';
+import { UpiPay } from '@/components/UpiPay';
 import { dt, inr, locationLabel, statusLabel } from '@/lib/format';
 import { rateLimited } from '@/lib/ratelimit';
 import { serviceClient } from '@/lib/supabase/server';
@@ -12,12 +13,12 @@ import { Invalid } from './Invalid';
 export const metadata: Metadata = { title: 'My health camp progress', referrer: 'no-referrer' };
 
 type View = {
-  event: { name: string; venue: string; help: string; instructions: string; timezone: string; lab_partner: string; status: string };
+  event: { name: string; venue: string; help: string; instructions: string; timezone: string; lab_partner: string; status: string; upi_vpa: string | null; upi_payee_name: string | null };
   registration: { code: string; first_name: string; package: string; created_at: string; has_mobile: boolean };
   next_step: { service: string; station: string; station_code: string; location: string; instructions: string; state: string; seq: number; ahead: number } | null;
   tasks: { id: string; service: string; location: string; source: string; status: string; items: { id: string; name: string; report: string }[] | null }[];
   walkin_centres: { name: string; address: string; hours: string; instructions: string; valid_from: string | null; valid_to: string | null }[];
-  payments: { status: string; amount_paise: number; refunded_paise: number; receipt_no: string | null; items: string[] }[];
+  payments: { status: string; amount_paise: number; refunded_paise: number; receipt_no: string | null; items: string[]; kind: 'package' | 'addon' }[];
 };
 
 const STEP_TEXT: Record<string, string> = { queued: 'Please go to', called: 'You have been called — go now to', in_service: 'You are being attended at' };
@@ -34,6 +35,9 @@ export default async function Portal({ params }: { params: Promise<{ token: stri
   const pkgWalk = v.tasks.filter((t) => t.source === 'package' && t.location === 'walk_in');
   const addons = v.tasks.filter((t) => t.source === 'addon');
   const pct = (ts: typeof pkgDay) => (ts.length ? Math.round((ts.filter((t) => done(t.status)).length / ts.length) * 100) : 0);
+  const pkgPay = v.payments.find((p) => p.kind === 'package');
+  const due = v.payments.filter((p) => ['pending', 'requires_review'].includes(p.status));
+  const upi = { upi_vpa: v.event.upi_vpa, upi_payee_name: v.event.upi_payee_name };
   const reportsAvailable = v.tasks.some((t) => (t.items ?? []).some((i) => i.report === 'available'));
 
   const taskList = (ts: typeof pkgDay) => (
@@ -56,8 +60,20 @@ export default async function Portal({ params }: { params: Promise<{ token: stri
         <div className="card">
           <div className="small muted">{v.event.name}</div>
           <h2 style={{ fontSize: '1.4rem', marginTop: 4 }}>Hello {v.registration.first_name}</h2>
-          <div className="row" style={{ marginTop: 8 }}><span className="mono strong">{v.registration.code}</span><span className="badge plain tag-sponsor">{v.registration.package} · free of charge</span></div>
+          <div className="row" style={{ marginTop: 8 }}><span className="mono strong">{v.registration.code}</span><span className="badge plain tag-sponsor">{v.registration.package}{pkgPay ? ` · ${inr(pkgPay.amount_paise)}` : ' · free of charge'}</span>
+            {pkgPay ? <StatusBadge status={pkgPay.status} /> : null}</div>
         </div>
+
+        {due.length ? (
+          <div className="card" aria-live="polite">
+            <h3>Payment due · {inr(due.reduce((n, p) => n + p.amount_paise, 0))}</h3>
+            <p className="small text2">Your {due.some((p) => p.kind === 'package') ? 'package tests start' : 'add-on tests start'} once the payment is confirmed at the desk.</p>
+            {due.map((p, i) => (
+              <div key={i} style={{ marginTop: 10 }}>
+                <div className="strong small">{p.kind === 'package' ? `Package · ${v.registration.package}` : `Add-on · ${p.items.join(', ')}`}</div>
+                <UpiPay settings={upi} amountPaise={p.amount_paise} reference={v.registration.code} staff={false} />
+              </div>))}
+          </div>) : null}
 
         <section className="glass next-step" aria-live="polite">
           <div className="eyebrow">Your next step</div>
@@ -101,7 +117,7 @@ export default async function Portal({ params }: { params: Promise<{ token: stri
           <div className="card">
             <h3>Add-on tests (paid by you)</h3>
             {taskList(addons)}
-            <ul className="list">{v.payments.map((p, i) => (
+            <ul className="list">{v.payments.filter((p) => p.kind === 'addon').map((p, i) => (
               <li key={i}><span>{p.items.join(', ')} · {inr(p.amount_paise)}{p.receipt_no ? <span className="small muted"> · receipt {p.receipt_no}</span> : null}</span><StatusBadge status={p.status} /></li>))}</ul>
           </div>) : null}
 

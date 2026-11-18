@@ -5,6 +5,7 @@ import { friendlyError } from '@/lib/errors';
 import { bool, go, intOrNull, safePath, str, strOrNull } from '@/lib/flash';
 import { localInputToIso, toPaise } from '@/lib/format';
 import { createClient, serviceClient } from '@/lib/supabase/server';
+import { VPA_RE } from '@/lib/upi';
 
 async function admin(fd: FormData, defaultReason?: string) {
   const eventId = str(fd, 'event_id');
@@ -37,7 +38,9 @@ export async function saveEventProfile(fd: FormData) {
 }
 
 export async function saveEventSettings(fd: FormData) {
-  const { eventId, ctx, db, done } = await admin(fd);
+  const { eventId, ctx, db, done, back } = await admin(fd);
+  const vpa = str(fd, 'upi_vpa');
+  if (vpa && !VPA_RE.test(vpa)) go(back, 'err', 'The UPI ID does not look valid (expected something like labname@okicici).');
   const methods = fd.getAll('payment_methods').map(String).filter(Boolean);
   const extra = str(fd, 'payment_methods_extra').split(',').map((m) => m.trim().toLowerCase().replace(/[^a-z0-9_]/g, '')).filter(Boolean);
   const settings = {
@@ -45,7 +48,8 @@ export async function saveEventSettings(fd: FormData) {
     require_consent: bool(fd, 'require_consent'), payment_maker_checker: bool(fd, 'payment_maker_checker'),
     report_maker_checker: bool(fd, 'report_maker_checker'), portal_otp_required: true,
     grouping_approved: bool(fd, 'grouping_approved'), payment_methods: [...new Set([...methods, ...extra])],
-    payment_instructions: str(fd, 'payment_instructions'), default_service_minutes: intOrNull(fd, 'default_service_minutes') ?? 5,
+    payment_instructions: str(fd, 'payment_instructions'), upi_vpa: vpa, upi_payee_name: str(fd, 'upi_payee_name').slice(0, 60),
+    default_service_minutes: intOrNull(fd, 'default_service_minutes') ?? 5,
     label: { width_mm: intOrNull(fd, 'label_w') ?? 90, height_mm: intOrNull(fd, 'label_h') ?? 55, show_age: bool(fd, 'label_show_age') },
   };
   const { error } = await db.from('events').update({ settings }).eq('id', eventId);
@@ -53,7 +57,7 @@ export async function saveEventSettings(fd: FormData) {
 }
 
 export async function saveTest(fd: FormData) {
-  const { eventId, db, done, back } = await admin(fd);
+  const { eventId, ctx, db, done, back } = await admin(fd);
   const id = strOrNull(fd, 'id');
   const row = {
     event_id: eventId, code: str(fd, 'code').toUpperCase(), display_name: str(fd, 'display_name'), category: str(fd, 'category'),
@@ -74,6 +78,17 @@ export async function saveTest(fd: FormData) {
   if (service && (!cur || cur.service_id !== service || cur.completion_rule !== rule)) {
     const { error } = await db.from('workflow_service_tests').insert({ event_id: eventId, service_id: service, test_id: testId, completion_rule: rule });
     if (error) go(back, 'err', friendlyError(error));
+  }
+  // optional quick add-on price: replaces the active price (existing orders keep their snapshot)
+  if (str(fd, 'price') && ctx.can('addon.price.edit')) {
+    let price = 0;
+    try { price = toPaise(str(fd, 'price')); } catch (e) { go(back, 'err', (e as Error).message); }
+    const { data: cur } = await db.from('addon_prices').select('id, price_paise').eq('test_id', testId).eq('active', true);
+    if (!(cur?.length === 1 && cur[0].price_paise === price)) {
+      if (cur?.length) { const { error } = await db.from('addon_prices').update({ active: false }).in('id', cur.map((c) => c.id)); if (error) go(back, 'err', friendlyError(error)); }
+      const { error } = await db.from('addon_prices').insert({ event_id: eventId, test_id: testId, price_paise: price });
+      if (error) go(back, 'err', friendlyError(error));
+    }
   }
   done(null, 'Test saved');
 }
@@ -216,4 +231,66 @@ export async function setOverride(fd: FormData) {
     ? await db.from('member_permission_overrides').delete().match(key)
     : await db.from('member_permission_overrides').upsert({ ...key, granted: mode === 'grant', created_by: ctx.user.id });
   done(error, 'Individual permission updated');
+}
+
+// ---------------------------------------------------------------- deletion and lifecycle
+
+export async function deleteTest(fd: FormData) {
+  const { db, done } = await admin(fd, 'Test deleted from catalogue');
+  const { error } = await db.rpc('delete_test', { p_test: str(fd, 'id'), p_reason: strOrNull(fd, 'reason') });
+  done(error, 'Test deleted');
+}
+
+export async function createPackage(fd: FormData) {
+  const { eventId, db, done } = await admin(fd, 'Package created');
+  const { error } = await db.rpc('create_package', { p_event: eventId, p_code: str(fd, 'code'), p_name: str(fd, 'name'),
+    p_code_letter: str(fd, 'code_letter'), p_description: str(fd, 'description') });
+  done(error, 'Package created. Add its tests below.');
+}
+
+export async function deletePackage(fd: FormData) {
+  const { db, done } = await admin(fd, 'Package deleted');
+  const { error } = await db.rpc('delete_package', { p_package: str(fd, 'id'), p_reason: strOrNull(fd, 'reason') });
+  done(error, 'Package deleted');
+}
+
+export async function setPackageRate(fd: FormData) {
+  const { db, done, back } = await admin(fd, 'Package price changed');
+  let amount: number | null = null;
+  if (str(fd, 'price')) { try { amount = toPaise(str(fd, 'price')); } catch (e) { go(back, 'err', (e as Error).message); } }
+  const { error } = await db.rpc('set_package_rate', { p_package: str(fd, 'id'), p_amount_paise: amount, p_reason: strOrNull(fd, 'reason') });
+  done(error, amount == null ? 'Package price cleared' : 'Package price saved');
+}
+
+/** Remove report files from private storage after the database rows are gone. */
+async function removeReportFiles(keys: string[] | null) {
+  const list = keys ?? [];
+  for (let i = 0; i < list.length; i += 100) {
+    const { error } = await serviceClient().storage.from('reports').remove(list.slice(i, i + 100));
+    // files are private and unreferenced; log and continue rather than fail an already-committed reset
+    if (error) console.error('report file cleanup failed', { count: list.length, message: error.message });
+  }
+}
+
+export async function resetEvent(fd: FormData) {
+  const eventId = str(fd, 'event_id');
+  const back = `/e/${eventId}/admin/event`;
+  const ctx = await getEventContext(eventId);
+  const { data, error } = await ctx.supabase.rpc('reset_event', { p_event: eventId, p_confirm_code: str(fd, 'confirm'), p_reason: str(fd, 'reason') });
+  if (error) go(back, 'err', friendlyError(error));
+  await removeReportFiles(data as string[] | null);
+  revalidatePath(`/e/${eventId}`, 'layout');
+  go(back, 'ok', 'Event reset: all participants, orders, queues and reports were removed. Configuration and staff are kept; status is Draft.');
+}
+
+export async function deleteEvent(fd: FormData) {
+  const eventId = str(fd, 'event_id');
+  const back = safePath(str(fd, 'back'), '/platform');
+  const ctx = await getEventContext(eventId);
+  if (!ctx.profile.is_platform_admin) go(back, 'err', 'Only a platform admin can delete an event.');
+  const { data, error } = await ctx.supabase.rpc('delete_event', { p_event: eventId, p_confirm_code: str(fd, 'confirm') });
+  if (error) go(back, 'err', friendlyError(error));
+  await removeReportFiles(data as string[] | null);
+  revalidatePath('/platform'); revalidatePath('/select-event');
+  go('/platform', 'ok', `Event ${ctx.event.code} deleted permanently.`);
 }

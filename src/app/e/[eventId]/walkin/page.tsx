@@ -53,7 +53,7 @@ export default async function Walkin({ params, searchParams }: { params: Promise
               const opts = group ? snap!.tests.filter((x) => x.choice_group_id === group.id) : [];
               return (
                 <li key={t.id} style={{ display: 'block' }}>
-                  <div className="row-between"><span className="strong">{t.service_name}</span><span className="row"><SourceTag source={t.source} /><StatusBadge status={t.status} /></span></div>
+                  <div className="row-between"><span className="strong">{t.service_name}</span><span className="row"><SourceTag source={t.source} custom={ctx.event.settings.package_mode !== 'female_male'} /><StatusBadge status={t.status} /></span></div>
                   <div className="small text2">{t.task_items.filter((i) => i.order_items.status === 'active').map((i) => i.order_items.test_name).join(', ') || 'No option selected yet'}</div>
                   {!t.payment_cleared && ['not_attended', 'awaiting_choice'].includes(t.status) ? <div className="alert alert-warn small" style={{ marginTop: 6 }}>Add-on payment not verified yet — send the participant to the cashier before check-in.</div> : null}
                   {['in_service', 'completed'].includes(t.status) ? t.task_items.filter((i) => i.order_items.status === 'active' && i.order_items.completion_rule === 'manual_confirm').map((i) => (

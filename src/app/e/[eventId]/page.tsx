@@ -9,6 +9,7 @@ import { inr, statusLabel } from '@/lib/format';
 
 type Overview = {
   registrations: { total: number; female: number; male: number; arrived: number; last_hour: number };
+  by_package: { name: string; classification: string; count: number }[];
   by_counter: { name: string; count: number }[]; by_staff: { name: string; count: number }[];
   tasks: Record<string, number>;
   stations: { id: string; code: string; name: string; kind: string; status: string; pause_reason: string | null; staff: number; queued: number; in_service: number; completed: number; services: string | null; est_wait: number }[];
@@ -52,7 +53,10 @@ export default async function Dashboard({ params }: { params: Promise<{ eventId:
 
       <div className="stats">
         <Stat label="Registered" value={r.total} hint={`${r.last_hour} in the last hour`} />
-        <Stat label="Female / Male" value={`${r.female} / ${r.male}`} hint={r.total ? `${Math.round((r.female / r.total) * 100)}% / ${Math.round((r.male / r.total) * 100)}%` : '—'} />
+        {ctx.event.settings.package_mode === 'female_male'
+          ? <Stat label="Female / Male" value={`${r.female} / ${r.male}`} hint={r.total ? `${Math.round((r.female / r.total) * 100)}% / ${Math.round((r.male / r.total) * 100)}%` : '—'} />
+          : <Stat label="By package" value={(o.by_package ?? []).length ? (o.by_package ?? []).map((b) => b.count).join(' / ') : '—'}
+              hint={(o.by_package ?? []).map((b) => b.name).join(' / ') || 'no packages'} />}
         <Stat label="Appeared" value={r.arrived} hint="at least one service started" />
         <Stat label="Waiting, no station" value={o.waiting_unassigned} tone={o.waiting_unassigned ? 'warn' : undefined} hint="participants" />
         <Stat label="Event-day services" value={`${ed.done}`} hint={`${ed.open} open · ${ed.exc} exceptions/no-shows`} />

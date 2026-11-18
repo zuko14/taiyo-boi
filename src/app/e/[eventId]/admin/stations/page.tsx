@@ -25,7 +25,7 @@ export default async function Stations({ params }: { params: Promise<{ eventId: 
     return (
       <AdminForm action={saveStation} eventId={eventId} back={back} live={live} hidden={{ id: s?.id, kind: s ? undefined : k }}>
         <div className="form-row">
-          {!s ? <div className="field"><label>Code</label><input name="code" required pattern="[A-Za-z0-9_-]{1,20}" /></div> : null}
+          {!s ? <div className="field"><label>Code</label><input name="code" required pattern="[A-Za-z0-9_\-]{1,20}" /></div> : null}
           <div className="field"><label>Name</label><input name="name" defaultValue={s?.name} required /></div>
           <div className="field"><label>Location / room</label><input name="location" defaultValue={s?.location} /></div>
           {k === 'station' ? <>
