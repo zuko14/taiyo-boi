@@ -8,9 +8,10 @@ import { Card, PageHead, SourceTag, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
 import { env } from '@/lib/env';
 import { classLabel, dt, inr, locationLabel } from '@/lib/format';
+import { nowMs } from '@/lib/clock';
 
 type Item = { id: string; test_name: string; test_code: string; source: string; status: string; unit_price_paise: number; location: string };
-type Task = { id: string; service_name: string; location: string; source: string; status: string; status_reason: string | null;
+type Task = { id: string; service_id: string; service_name: string; location: string; source: string; status: string; status_reason: string | null;
   choice_group_id: string | null; payment_intent_id: string | null; payment_exception: boolean; external_accession: string | null;
   stations: { name: string; code: string } | null; task_items: { order_items: Item }[] };
 type Snapshot = { choice_groups: { id: string; name: string; rule: string }[]; tests: { test_id: string; name: string; choice_group_id: string | null }[] };
@@ -37,6 +38,26 @@ export default async function ParticipantDetail({ params }: { params: Promise<{ 
     ctx.can('report.view') ? ctx.supabase.from('reports').select('id, title, status, version, order_item_id, published_at').eq('registration_id', regId) : Promise.resolve({ data: null }),
   ]);
   const tasks = (tasksRaw ?? []) as Task[];
+  // why a waiting participant has no station: per compatible station, what is missing
+  const waiting = tasks.filter((t) => t.status === 'waiting_unassigned');
+  const [{ data: caps }, { data: sts }, { data: shifts }] = waiting.length ? await Promise.all([
+    ctx.supabase.from('station_capabilities').select('station_id, service_id').eq('event_id', eventId).in('service_id', waiting.map((t) => t.service_id)),
+    ctx.supabase.from('stations').select('id, code, name, status, accepts_assignments').eq('event_id', eventId).eq('kind', 'station'),
+    ctx.supabase.from('staff_assignments').select('station_id, shift_start, shift_end').eq('event_id', eventId).eq('status', 'active'),
+  ]) : [{ data: [] }, { data: [] }, { data: [] }];
+  const nowT = nowMs();
+  const whyWaiting = (serviceId: string) => {
+    const list = (caps ?? []).filter((c) => c.service_id === serviceId).map((c) => (sts ?? []).find((s) => s.id === c.station_id)).filter((s) => !!s);
+    if (!list.length) return ['No station is set up for this service — map it in Stations & counters.'];
+    return list.map((s) => {
+      const mine = (shifts ?? []).filter((a) => a.station_id === s.id);
+      const onNow = mine.some((a) => new Date(a.shift_start).getTime() <= nowT && new Date(a.shift_end).getTime() >= nowT);
+      const next = mine.filter((a) => new Date(a.shift_start).getTime() > nowT).sort((a, b) => +new Date(a.shift_start) - +new Date(b.shift_start))[0];
+      const issues = [s.status !== 'open' ? `station is ${s.status}` : null, !s.accepts_assignments ? 'not accepting assignments' : null,
+        !onNow ? (next ? `no staff on shift until ${dt(next.shift_start, tz, false)}` : 'no staff shift assigned') : null].filter(Boolean);
+      return `${s.code}: ${issues.length ? issues.join(', ') : 'available — will be assigned on the next refresh'}`;
+    });
+  };
   const active = (queue ?? []).find((q) => ['queued', 'called', 'in_service'].includes(q.state));
   const pkgTasks = tasks.filter((t) => t.source === 'package');
   const addonTasks = tasks.filter((t) => t.source === 'addon');
@@ -52,6 +73,7 @@ export default async function ParticipantDetail({ params }: { params: Promise<{ 
           <div className="row"><StatusBadge status={t.status} />{t.payment_intent_id && t.payment_exception ? <span className="badge amber">payment exception</span> : null}</div>
         </div>
         {t.status_reason ? <div className="small muted">{t.status_reason}</div> : null}
+        {t.status === 'waiting_unassigned' ? <ul className="small text2" style={{ margin: '4px 0 0', paddingLeft: 18 }}>{whyWaiting(t.service_id).map((w) => <li key={w}>{w}</li>)}</ul> : null}
         <div className="row small text2" style={{ gap: 6, marginTop: 4 }}>
           {t.task_items.filter((ti) => ti.order_items.status === 'active').map(({ order_items: i }) => {
             const rp = reportFor(i.id);

@@ -3,7 +3,9 @@ import { SubmitButton } from '@/components/SubmitButton';
 import { Card, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
 import { inr, locationLabel } from '@/lib/format';
-import { deleteTest, saveTest } from '../actions';
+import { deleteTest, importCatalog, saveTest } from '../actions';
+import { CatalogImport } from '@/components/CatalogImport';
+import Link from 'next/link';
 
 type Test = { id: string; code: string; display_name: string; category: string; source_wording: string; lab_order_code: string | null; instructions: string;
   location: string; active: boolean; archived: boolean; addon_available: boolean };
@@ -46,7 +48,7 @@ export default async function Catalog({ params }: { params: Promise<{ eventId: s
       </div>
       <div className="row">
         <label className="check"><input type="checkbox" name="active" defaultChecked={t?.active ?? true} />Active</label>
-        <label className="check"><input type="checkbox" name="addon_available" defaultChecked={t?.addon_available ?? false} />Offer as add-on</label>
+        <label className="check"><input type="checkbox" name="addon_available" defaultChecked={t?.addon_available ?? false} />{ctx.event.settings.package_mode === 'female_male' ? 'Offer as add-on' : 'Sell to participants (registration & add-on desk)'}</label>
         <label className="check"><input type="checkbox" name="archived" defaultChecked={t?.archived ?? false} />Archived</label>
         <span className="spacer" />{edit ? <SubmitButton className="btn btn-solid btn-sm">{t ? 'Save' : 'Create test'}</SubmitButton> : null}
       </div>
@@ -59,6 +61,13 @@ export default async function Catalog({ params }: { params: Promise<{ eventId: s
         ? "Brochure shorthand (B2, BT2, D) is kept as supplied. Edit names/codes only from the Lab Partner's approved catalogue."
         : 'All tests offered at this camp. Add them to packages on the Packages page; an add-on price makes a test purchasable by participants.'} />
       {!edit ? <div className="alert alert-info">Read-only: you do not have catalogue.edit.</div> : null}
+      {edit ? (
+        <Card title="Bulk upload tests and prices (CSV)" sub="Columns: code, name, category, price_inr, location (event_day / walk_in), service. Blank code is generated from the name; blank service = Sample collection. Re-uploading the same codes updates names and prices — existing orders keep their old price."
+          actions={<div className="row"><a className="btn btn-ghost btn-sm" href={`/e/${eventId}/admin/catalog/template`}>Download template</a>
+            <a className="btn btn-ghost btn-sm" href={`/e/${eventId}/admin/catalog/template?current=1`}>Export current catalogue</a></div>}>
+          <p className="small muted" style={{ marginTop: 0 }}>Excel sheets work too (including the lab&apos;s MRP list with &ldquo;Test Description&rdquo; and &ldquo;MRP (INR)&rdquo; columns): open it in Excel and use File → Save As → CSV UTF-8. A price makes the test sellable; map tests to visits in the table below or via the service column. <Link href={`/e/${eventId}/admin/packages`}>Packages</Link> can then bundle them.</p>
+          <CatalogImport action={importCatalog} eventId={eventId} back={back} live={live} existing={((tests ?? []) as Test[]).map((t) => t.code)} />
+        </Card>) : null}
       <Card>
         <div className="table-wrap"><table>
           <thead><tr><th>Code</th><th>Name</th><th>Original wording</th><th>Location</th><th>Service</th><th>Add-on</th><th>Add-on price</th><th>Status</th><th></th></tr></thead>

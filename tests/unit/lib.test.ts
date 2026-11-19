@@ -72,3 +72,29 @@ describe('upi', () => {
     expect(upiPayee({})).toBeNull();
   });
 });
+
+import { mapCatalog, parseCsv, priceToPaise } from '@/lib/catalog-import';
+describe('catalogue import', () => {
+  it('parses quoted CSV with commas, escaped quotes, CRLF and BOM', () => {
+    expect(parseCsv('﻿a,"b,c","d ""q"""\r\n1,2,3')).toEqual([['a', 'b,c', 'd "q"'], ['1', '2', '3']]);
+  });
+  it('reads the lab MRP sheet layout: title rows, aliases, totals rows, generated unique codes', () => {
+    const csv = 'MASTER LIST,,,\nS. No,Category,Test Description,MRP (INR)\n1,Thyroid,TSH,"₹1,200"\n2,Thyroid,TSH,300\n,TOTAL / AVERAGE SUMMARY,,\n';
+    const r = mapCatalog(parseCsv(csv));
+    expect(r.errors).toEqual([]);
+    expect(r.rows.map((x) => [x.code, x.name, x.category, x.price_paise, x.location])).toEqual([
+      ['TSH', 'TSH', 'Thyroid', 120000, 'event_day'], ['TSH-2', 'TSH', 'Thyroid', 30000, 'event_day']]);
+  });
+  it('round-trips the template columns and reports bad rows with line numbers', () => {
+    const r = mapCatalog(parseCsv("code,name,category,price_inr,location,service\nECG,ECG,Cardiac,400,event_day,ecg\nX,Bad price,,abc,,\nUSG,USG,,1500,walkin,\nDUP,'=Name,,,,\nDUP,Again,,,,\n"));
+    expect(r.rows.find((x) => x.code === 'ECG')?.service_code).toBe('ECG');
+    expect(r.rows.find((x) => x.code === 'USG')?.location).toBe('walk_in');
+    expect(r.rows.find((x) => x.code === 'DUP')?.name).toBe('=Name');
+    expect(r.errors.map((e) => e.line)).toEqual([3, 6]);
+  });
+  it('prices', () => {
+    expect(priceToPaise('Rs. 1,499.50')).toBe(149950);
+    expect(priceToPaise('')).toBeNull();
+    expect(priceToPaise('12.345')).toBe('invalid');
+  });
+});

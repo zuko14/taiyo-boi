@@ -67,6 +67,20 @@ Dated 10 Nov 2026 unless noted. “Provisional” means configurable and awaitin
 - **Catalogue delete** (`delete_test`): allowed only while no participant order references the test; also removes it from packages and add-on prices. Otherwise archive.
 - **Camera scanning**: every scan box has a Camera button. Android Chrome uses the native BarcodeDetector (QR + Code 128); other browsers (iOS Safari, Firefox) fall back to jsQR (QR only). Requires HTTPS. `Permissions-Policy` now allows `camera=(self)`.
 
+## 2026-11-19 — pay-per-test camps, catalogue CSV import, queue re-check
+
+- **Pay-per-test (custom events)**: the registration desk ticks the event's priced tests ("Sell to participants"); `register_participant(..., p_test_ids)` creates the registration and the paid test order **in one transaction** (a bad test rolls the whole registration back). Patients with no package go on an automatic `PAY_PER_TEST` package (no tests of its own; created on first use with an audited system reason). Tests queue only after the cashier verifies payment. BOI (female/male) events still sell extras only at the add-on desk.
+- **Catalogue CSV import** (`import_catalog`, `catalogue.edit`; prices also need `addon.price.edit`): upsert by code, atomic, ≤2000 rows. Blank code → generated from the name; blank service → `SAMPLE` (event day) / `WALKIN` (walk-in), auto-created. A changed price replaces the active one; orders keep their snapshot. Accepts the template and the lab's "MRP" sheet headers (Test Description / MRP (INR) / Category). Excel must be saved as CSV (no xlsx parser added). The browser preview is never trusted; the server re-parses.
+- **Queue re-check**: assignment previously ran only on registration, station open, shift assign, call-next and going live, so a shift whose start time arrived later left patients waiting forever. Every live staff page render now calls `nudge_waiting`, a no-op unless a waiting patient has a compatible open station with staff on shift now. The participant page lists, per compatible station, exactly what is missing (closed / no shift until hh:mm / not mapped).
+
+## 2026-11-19 — fully automatic queue (no "Call next")
+
+- Assignment is unchanged: lowest estimated wait (people queued/in service × minutes ÷ staff on shift) among compatible open staffed stations, then round-robin.
+- **Auto-call**: a station has `least(capacity, staff on shift)` service slots. Whenever a slot is free, the next participant in its queue is set to *called* by the system (portal: "go now"). Staff only press Start, Complete, or No-show.
+- **Auto-move**: a free station with an empty queue takes the longest-waiting participant from a compatible station that cannot serve them now (all slots busy, unstaffed, or not open). Called or in-service participants are never moved by this rule; each move is audited (`queue.auto_move`).
+- `_autoflow` runs at the end of every scheduling decision (registration, payment, completion, no-show, station open/close, shift changes, and the page-refresh nudge), inside the event advisory lock, so it is serialised with all queue writes. Ending a station's last shift now also re-routes its *called* participants. `call_next` was removed from the UI and the RPC allowlist.
+- No automatic no-show timer: a called participant who never arrives holds the slot until staff press No-show (a timeout needs an approved duration).
+
 ## Open approvals (CLAUDE.md §20 highest priority)
 
 1. Lab Partner approval of catalogue, order codes, and test→visit grouping.

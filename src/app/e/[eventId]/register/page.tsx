@@ -6,6 +6,8 @@ import { Card, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
 import { myStations } from '@/lib/duty';
 import { classLabel, dt, inr } from '@/lib/format';
+import { nowMs } from '@/lib/clock';
+import { TestPicker, type PickTest } from '@/components/TestPicker';
 import { idemKey } from '@/lib/supabase/server';
 import { registerParticipant } from './actions';
 
@@ -21,6 +23,22 @@ export default async function RegisterPage({ params, searchParams }: { params: P
   const { data: packages } = await ctx.supabase.from('packages').select('id, classification, name, active, price_paise').eq('event_id', eventId).order('classification');
   const canOverride = ctx.can('registration.classification_override');
   const requireConsent = ctx.event.settings.require_consent !== false;
+  const custom = ctx.event.settings.package_mode !== 'female_male';
+  // pay-per-test camps: the event's priced, sellable tests (current price; server recomputes)
+  const [{ data: sellable }, { data: prices }, { data: pkgTests }] = custom ? await Promise.all([
+    ctx.supabase.from('test_catalog').select('id, display_name, category, location').eq('event_id', eventId).eq('active', true).eq('archived', false).eq('addon_available', true).order('category').order('display_name'),
+    ctx.supabase.from('addon_prices').select('test_id, price_paise, tax_paise, location_scope, effective_from, effective_to').eq('event_id', eventId).eq('active', true).order('effective_from', { ascending: false }),
+    ctx.supabase.from('package_tests').select('test_id, packages!inner(classification)').eq('event_id', eventId),
+  ]) : [{ data: [] }, { data: [] }, { data: [] }];
+  const now = nowMs();
+  const pickTests: PickTest[] = (sellable ?? []).flatMap((t) => {
+    const p = (prices ?? []).find((x) => x.test_id === t.id && (x.location_scope === 'both' || x.location_scope === t.location)
+      && new Date(x.effective_from).getTime() <= now && (!x.effective_to || new Date(x.effective_to).getTime() > now));
+    return p ? [{ id: t.id, name: t.display_name, category: t.category, location: t.location, price_paise: p.price_paise + p.tax_paise }] : [];
+  });
+  const packageTests: Record<string, string[]> = {};
+  for (const x of pkgTests ?? []) { const c = (x.packages as unknown as { classification: string }).classification; (packageTests[c] ??= []).push(x.test_id); }
+  const pkgChoices = (packages ?? []).filter((p) => p.classification !== 'pay_per_test');
 
   const checked = sp.checked === '1';
   const dupes = checked && (sp.employee_id || sp.mobile || sp.name)
@@ -56,16 +74,23 @@ export default async function RegisterPage({ params, searchParams }: { params: P
             ) : <div className="alert alert-ok" style={{ marginTop: 16 }}>No existing registration found for these details.</div>) : null}
           </Card>
 
-          <Card title="2 · Register participant" sub="The package is selected automatically from the Female/Male classification.">
+          <Card title="2 · Register participant" sub={custom ? 'Choose a package, individual paid tests, or both.' : 'The package is selected automatically from the Female/Male classification.'}>
             <form action={registerParticipant}>
               <input type="hidden" name="event_id" value={eventId} /><input type="hidden" name="counter" value={counter} />
               <input type="hidden" name="idem" value={await idemKey()} />
               <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
-                <legend className="label" style={{ marginBottom: 8 }}>{ctx.event.settings.package_mode === 'female_male' ? 'Classification' : 'Package'} (required)</legend>
+                <legend className="label" style={{ marginBottom: 8 }}>{custom ? 'Package' : 'Classification (required)'}</legend>
                 <div className="choice-cards">
-                  {(packages ?? []).map((p) => (
+                  {custom && pickTests.length ? (
+                    <label className="choice-card">
+                      <input type="radio" name="classification" value="" defaultChecked />
+                      <span className="title">Tests only</span>
+                      <span className="small text2">No package — pick tests below</span>
+                      <span className="small muted">Pays for the selected tests</span>
+                    </label>) : null}
+                  {pkgChoices.map((p) => (
                     <label key={p.id} className="choice-card">
-                      <input type="radio" name="classification" value={p.classification} required disabled={!p.active} />
+                      <input type="radio" name="classification" value={p.classification} required={!custom || !pickTests.length} disabled={!p.active} />
                       <span className="title">{classLabel(p.classification)}</span>
                       <span className="small text2">{p.name}</span>
                       <span className="small muted">{p.price_paise ? `Participant pays ${inr(p.price_paise)}` : ctx.event.settings.package_mode === 'female_male' ? 'Sponsored · employee pays ₹0' : 'Free for the participant'}</span>
@@ -73,6 +98,8 @@ export default async function RegisterPage({ params, searchParams }: { params: P
                   ))}
                 </div>
               </fieldset>
+              {custom && pickTests.length ? <TestPicker tests={pickTests} packageTests={packageTests} /> : null}
+              {custom && !pickTests.length ? <p className="small muted">No priced tests yet — add them (or upload a CSV) in the Test catalogue to sell individual tests here.</p> : null}
               <div className="field"><label htmlFor="full_name">Full name</label><input id="full_name" name="full_name" required maxLength={120} defaultValue={sp.name} /></div>
               <div className="form-row">
                 <div className="field"><label htmlFor="age">Age</label><input id="age" name="age" type="number" min={0} max={120} /></div>
@@ -96,8 +123,8 @@ export default async function RegisterPage({ params, searchParams }: { params: P
                   </div>
                 </details>
               ) : null}
-              <label className="check"><input type="checkbox" name="consent" required={requireConsent} />
-                <span className="small">Participant has read the privacy notice and consents to registration{requireConsent ? ' (required)' : ''}.</span></label>
+              <label className="check"><input type="checkbox" name="consent" required={requireConsent} data-required={requireConsent ? '1' : '0'} />
+                <span className="small">Participant has read the privacy notice and consents to registration{requireConsent ? ' (required)' : ''}{custom ? ', and confirms the selected tests and price' : ''}.</span></label>
               <div style={{ marginTop: 14 }}><SubmitButton className="btn btn-accent btn-lg btn-block">Register and print tag</SubmitButton></div>
             </form>
           </Card>

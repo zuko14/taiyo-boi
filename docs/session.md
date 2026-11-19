@@ -321,3 +321,68 @@ Because nothing is committed or deployed yet, execute in this exact order when r
 - **Personal vs. Merchant UPI IDs:** Some UPI apps ignore pre-filled `am=` amounts on personal VPAs; use a **lab merchant UPI ID** for reliable amount pre-fill.
 - **Manual Cashier Verification:** Static UPI QRs do not emit webhooks — cashiers must still verify via UTR/cash count. Auto-confirmation requires a future payment gateway integration (Razorpay / Cashfree / PhonePe for Business).
 - **Participant Portal Mobile Check:** Open a live participant tag URL on a phone to visually confirm the **Payment due** card and UPI deep link rendering.
+
+---
+
+# Engineering Session Log — 2026-11-19
+
+**Repository:** `boi-taiyo` (`https://github.com/zuko14/taiyo-boi`)  
+**Base Commit:** `61a7ba3`  
+**Session Status:** Verified locally (**78 automated tests passing**, 15 unit tests, lint, typecheck, and Next.js production build passing). Migrations `20261119000013` and `20261119000014` applied to hosted Supabase (`sgnflkglfkoqvfzjbrnr`); committed and pushed to `origin/main` for Render deployment.
+
+---
+
+## Executive Summary
+
+This session implemented **four major architectural enhancements**:
+
+1. **Pay-Per-Test Camps (A-la-carte Registration)** — On custom events, registration desk staff can select individual priced tests directly (`p_test_ids`). If the participant takes no package, the system automatically enrolls them into an audited `PAY_PER_TEST` package. The registration and paid order are created atomically in a single transaction.
+2. **Catalogue CSV Import** — Added atomic bulk upsert (`import_catalog`, up to 2000 rows) supporting standard templates as well as real-world Lab Partner "MRP" spreadsheets (auto-generating test codes and auto-provisioning default workflow services `SAMPLE` and `WALKIN`).
+3. **Queue Re-Check & Diagnostics (`nudge_waiting`)** — Resolved edge-case where participants remained unassigned if a station shift started *after* registration. Added proactive nudge calls on staff page loads and clear diagnostic messaging on the participant screen detailing why a task cannot yet be queued (closed / waiting for shift / unmapped).
+4. **Fully Automatic Queue Flow (`_autoflow`)** — Replaced manual "Call next" buttons with an automated service-slot model:
+   - **Auto-Call**: Whenever a station has a free service slot (`least(capacity, staff on shift)`), the next queued participant is automatically promoted to *called* ("go now").
+   - **Auto-Move**: Free stations with empty queues automatically pull the longest-waiting participants from overburdened or unstaffed stations (`queue.auto_move` audit entry).
+   - Ending a station's shift automatically un-calls and re-routes pending participants.
+
+---
+
+## Technical Details & Pin-to-Pin Reference
+
+### 1. Pay-Per-Test Camps (`register_participant` with `p_test_ids`)
+- **Database (`20261119000013`):**
+  - `register_participant` now accepts optional `p_test_ids jsonb default null`.
+  - On custom camps, if no package is chosen, it looks for or automatically creates a special `PAY_PER_TEST` package (`code_letter = 'T'`).
+  - Creates the registration and the paid test order in **one atomic transaction**. A single invalid or unpriced test rolls back the entire registration.
+  - Tests stay gated until payment verification by cashier.
+- **Frontend:**
+  - `src/components/TestPicker.tsx`: Searchable checkbox list showing test prices, category chips, and live total calculation.
+  - `src/app/e/[eventId]/register/page.tsx`: Embedded `<TestPicker>` for custom events under "Select tests".
+  - `src/app/e/[eventId]/register/actions.ts`: Extracted `test_ids` from FormData and passed to `register_participant`.
+
+### 2. Catalogue CSV Import
+- **Database (`20261119000013`):**
+  - `public.import_catalog(p_event uuid, p_rows jsonb)` — atomic bulk upsert up to 2000 items with `catalogue.edit` permission.
+  - Checks `addon.price.edit` before mutating active `addon_prices`.
+- **Application:**
+  - `src/lib/catalog-import.ts`: Robust CSV parser supporting quotes, CRLF, BOM, and Lab MRP spreadsheet headers (`Test Description`, `MRP (INR)`, `Category`).
+  - `src/components/CatalogImport.tsx`: Drag-and-drop / file input with live validation preview table and error indicators before committing.
+  - `src/app/e/[eventId]/admin/catalog/template/route.ts`: CSV template download route (`/e/[eventId]/admin/catalog/template`).
+
+### 3. Queue Re-check & Diagnostics
+- **Database (`20261119000013`):**
+  - Added `public.nudge_waiting(p_event uuid)`: Fast check that finds unassigned waiting tasks and runs `_schedule_next` if compatible open stations with active staff exist.
+  - Added `public.task_queue_diagnostics(p_task uuid)`: Evaluates compatible stations and reports exact reasons why a task is not in service (e.g. `station_closed`, `no_shift_now`, `no_compatible_station`).
+- **Application:**
+  - `src/app/e/[eventId]/layout.tsx`: Runs `nudge_waiting` in background on staff navigation.
+  - `src/app/e/[eventId]/participants/[regId]/page.tsx`: Displays station diagnostics badge/alert for blocked tasks.
+
+### 4. Fully Automatic Queue Flow (`20261119000014`)
+- **Database Function `_autoflow(p_event uuid)`:**
+  - Replaces manual queue calling.
+  - Computes available slots per station: `greatest(0, least(capacity, on_shift) - in_service - called)`.
+  - Promotes top queued participants to `called` state automatically.
+  - Auto-balances queues: re-assigns queued participants from busy/closed stations to idle compatible stations.
+  - Runs automatically inside advisory lock after registration, payment, task completion, no-show, shift change, and station status update.
+- **Cleanup:**
+  - Removed manual `call_next` button from `src/app/e/[eventId]/station/page.tsx` and removed `call_next` from `rpc-action.ts` allowlist.
+

@@ -412,3 +412,11 @@ tr.selected { background: var(--accent-soft2); }
 .rank-val { color: var(--text-strong); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rank-track { height: 8px; border-radius: 4px; background: var(--surface2); margin: 6px 0 4px; overflow: hidden; }
 .rank-fill { height: 100%; border-radius: 4px; background: var(--series-1); }
+
+/* ---------- paid test picker (registration desk) */
+.test-picker { margin: 14px 0; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface2); }
+.test-picker-list { max-height: 360px; overflow-y: auto; margin-top: 10px; display: grid; gap: 10px; }
+.test-picker fieldset { border: 0; padding: 0; margin: 0; }
+.test-picker legend { padding: 0; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+.test-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 8px 4px; min-height: 44px; border-bottom: 1px solid var(--border); }
+.test-row .test-price { font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }

@@ -42,7 +42,7 @@ export default async function Payments({ params, searchParams }: { params: Promi
               <tbody>{intents.map((i) => { const r = i.registrations as unknown as Reg; return (
                 <tr key={i.id} className={sel?.id === i.id ? 'selected' : ''}>
                   <td><Link href={`${base}?intent=${i.id}${sp.show ? '&show=all' : ''}`} className="strong mono">{r.registration_code}</Link><div className="small muted">{r.participants.full_name}</div></td>
-                  <td className="small">{(i.orders as unknown as { kind: string } | null)?.kind === 'package' ? 'Package' : 'Add-on'}</td>
+                  <td className="small">{(i.orders as unknown as { kind: string } | null)?.kind === 'package' ? 'Package' : 'Tests'}</td>
                   <td>{inr(i.amount_paise)}</td><td><StatusBadge status={i.status} /></td><td>{dt(i.created_at, tz)}</td></tr>); })}</tbody></table></div>
           ) : <Empty>Nothing waiting.</Empty>}
         </Card>

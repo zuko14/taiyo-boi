@@ -31,6 +31,9 @@ const NAV: (Omit<NavItem, 'href'> & { path: string; perms: string[] })[] = [
 export default async function EventLayout({ children, params }: { children: ReactNode; params: Promise<{ eventId: string }> }) {
   const { eventId } = await params;
   const ctx = await getEventContext(eventId);
+  // live staff screens auto-refresh; each render re-checks waiting participants against stations
+  // that became available (e.g. a shift whose start time just arrived). No-op when nothing changed.
+  if (ctx.event.status === 'live') await ctx.supabase.rpc('nudge_waiting', { p_event: eventId });
   const items = NAV.filter((n) => ctx.can(...n.perms)).map((n) => ({ group: n.group, label: n.label, icon: n.icon, href: `/e/${eventId}${n.path}` }));
   return (
     <div className="app">

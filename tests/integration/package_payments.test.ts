@@ -49,7 +49,7 @@ describe('participant-paid package', () => {
       { p_intent: r.payment_intent_id, p_method: 'upi_manual', p_provider_ref: `UTR${randomUUID().slice(0, 8)}`, p_amount_paise: 49900 }));
     expect(res.ok).toBe(true);
     const after = await tasks(r.registration_id);
-    expect(after[0].status).toBe('queued');
+    expect(after[0].status).toBe('called');            // station free: called automatically, no 'Call next'
     const rc = await must<{ snapshot: { package: { name: string; amount_paise: number } } }>(db().from('receipts').select('snapshot').eq('receipt_no', res.receipt_no).single());
     expect(rc.snapshot.package).toEqual({ name: 'Basic', amount_paise: 49900 });
   });

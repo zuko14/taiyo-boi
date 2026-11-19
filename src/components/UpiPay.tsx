@@ -6,7 +6,8 @@ import { upiLink, upiPayee } from '@/lib/upi';
 export function UpiPay({ settings, amountPaise, reference, staff = true }:
   { settings: Record<string, unknown>; amountPaise: number; reference: string; staff?: boolean }) {
   const payee = upiPayee(settings);
-  if (!payee || amountPaise <= 0) return null;
+  if (amountPaise <= 0) return null;
+  if (!payee) return staff ? <p className="small muted" style={{ margin: '6px 0 0' }}>No UPI ID configured, so no QR is shown — collect cash, or add the lab&apos;s UPI ID in Event &amp; readiness → Operational settings.</p> : null;
   const link = upiLink(payee, amountPaise, reference);
   return (
     <div className="upi-pay">

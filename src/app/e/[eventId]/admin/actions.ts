@@ -6,6 +6,7 @@ import { bool, go, intOrNull, safePath, str, strOrNull } from '@/lib/flash';
 import { localInputToIso, toPaise } from '@/lib/format';
 import { createClient, serviceClient } from '@/lib/supabase/server';
 import { VPA_RE } from '@/lib/upi';
+import { mapCatalog, parseCsv } from '@/lib/catalog-import';
 
 async function admin(fd: FormData, defaultReason?: string) {
   const eventId = str(fd, 'event_id');
@@ -293,4 +294,17 @@ export async function deleteEvent(fd: FormData) {
   await removeReportFiles(data as string[] | null);
   revalidatePath('/platform'); revalidatePath('/select-event');
   go('/platform', 'ok', `Event ${ctx.event.code} deleted permanently.`);
+}
+
+export async function importCatalog(fd: FormData) {
+  const { eventId, db, done, back } = await admin(fd, 'Catalogue CSV import');
+  const csv = str(fd, 'csv');
+  if (!csv) go(back, 'err', 'Choose a CSV file first.');
+  if (csv.length > 2_000_000) go(back, 'err', 'File is larger than 2 MB.');
+  const { rows, errors } = mapCatalog(parseCsv(csv));       // never trust the browser preview
+  if (errors.length) go(back, 'err', `Line ${errors[0].line}: ${errors[0].message}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`);
+  const { data, error } = await db.rpc('import_catalog', { p_event: eventId, p_rows: rows.map((r) => ({ ...r, line: undefined })), p_reason: strOrNull(fd, 'reason') });
+  if (error) go(back, 'err', friendlyError(error));
+  const d = data as { created: number; updated: number; prices_changed: number };
+  done(null, `Imported: ${d.created} new, ${d.updated} updated, ${d.prices_changed} price change(s).`);
 }

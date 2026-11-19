@@ -14,6 +14,7 @@ export async function registerParticipant(fd: FormData) {
       p_mobile: strOrNull(fd, 'mobile'), p_email: strOrNull(fd, 'email'), p_department: strOrNull(fd, 'department'),
       p_consent: bool(fd, 'consent'), p_package_override: strOrNull(fd, 'package_override'),
       p_override_reason: strOrNull(fd, 'override_reason'),
+      p_test_ids: fd.getAll('test_ids').map(String).filter(Boolean).length ? fd.getAll('test_ids').map(String).filter(Boolean) : null,
     }));
   const msg = res.already ? `Already registered (retry detected): ${res.registration_code}` : `Registered ${res.registration_code}`;
   redirect(`/e/${eventId}/participants/${res.registration_id}/tag?ok=${encodeURIComponent(msg)}`);

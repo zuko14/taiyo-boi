@@ -18,7 +18,7 @@ type Insights = {
 };
 
 const METHOD: Record<string, string> = { cash: 'Cash', upi_manual: 'UPI (lab QR)' };
-const SOURCE: Record<string, string> = { package: 'Packages', addon: 'Add-on tests' };
+
 const compact = (paise: number) => {
   const r = paise / 100;
   return r >= 1e7 ? `₹${(r / 1e7).toFixed(1)}Cr` : r >= 1e5 ? `₹${(r / 1e5).toFixed(1)}L` : r >= 1e3 ? `₹${(r / 1e3).toFixed(r >= 1e4 ? 0 : 1)}k` : `₹${Math.round(r)}`;
@@ -117,6 +117,7 @@ export default async function Revenue({ params }: { params: Promise<{ eventId: s
   const rate = net + v.open.pending_paise > 0 ? Math.round((net / (net + v.open.pending_paise)) * 100) : 0;
   const series = buckets(v.timeline);
   const peak = series.reduce((a, b) => (b.amount > (a?.amount ?? -1) ? b : a), series[0]);
+  const SOURCE: Record<string, string> = { package: 'Packages', addon: ctx.event.settings.package_mode === 'female_male' ? 'Add-on tests' : 'Individual tests' };
   const src = (['package', 'addon'] as const).map((s) => v.by_source.find((x) => x.source === s) ?? { source: s, collected_paise: 0, pending_paise: 0, payments: 0 });
   const srcTotal = src.reduce((n, s) => n + Math.max(0, s.collected_paise), 0);
 
@@ -162,7 +163,7 @@ export default async function Revenue({ params }: { params: Promise<{ eventId: s
       </Card>
 
       <div className="grid grid-2">
-        <Card title="Packages vs add-on tests" sub="Net collected by what was sold">
+        <Card title={`Packages vs ${SOURCE.addon.toLowerCase()}`} sub="Net collected by what was sold">
           {srcTotal > 0 ? (
             <>
               <div className="split" role="img" aria-label={src.map((s) => `${SOURCE[s.source]} ${inr(s.collected_paise)}`).join(', ')}>
@@ -182,7 +183,7 @@ export default async function Revenue({ params }: { params: Promise<{ eventId: s
 
       <div className="grid grid-2">
         <Card title="Top earners" sub="Packages and add-on tests ranked by money collected">
-          {v.top_items.length ? <RankBars rows={v.top_items.slice(0, 8).map((t) => ({ label: t.name, tag: t.kind === 'package' ? 'Package' : 'Add-on', amount: t.amount_paise, hint: `${t.count} sold · paid` }))} />
+          {v.top_items.length ? <RankBars rows={v.top_items.slice(0, 8).map((t) => ({ label: t.name, tag: t.kind === 'package' ? 'Package' : 'Test', amount: t.amount_paise, hint: `${t.count} sold · paid` }))} />
             : <Empty>No paid packages or add-ons yet.</Empty>}
         </Card>
         <Card title="By cashier" sub="Who verified the money">

@@ -73,7 +73,7 @@ describe('station workflow', () => {
     // scanning alone never completes: a scan only resolves the registration
     await must(staff.rpc('resolve_scan', { p_event: fx.eventId, p_code: r.registration_code, p_token_hash: null, p_station: a.station_id }));
     const t = (await tasksOf(r.registration_id)).find((x) => x.id === a.task_id)!;
-    expect(t.status).toBe('queued');
+    expect(t.status).toBe('called');                 // auto-called by the system, never started or completed by a scan
   });
 
   it('supervisors cannot reassign a task to an incompatible station', async () => {

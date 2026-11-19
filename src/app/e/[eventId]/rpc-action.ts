@@ -9,7 +9,7 @@ import { createClient } from '@/lib/supabase/server';
 // duty context and state transitions inside the database.
 const ALLOWED = new Set([
   'task_action', 'select_choice', 'correct_registration', 'resolve_duplicate', 'migrate_registration_config',
-  'revoke_tag', 'grant_payment_exception', 'confirm_tag_printed', 'call_next', 'reassign_task', 'rebalance_waiting',
+  'revoke_tag', 'grant_payment_exception', 'confirm_tag_printed', 'reassign_task', 'rebalance_waiting',
   'station_set_status', 'assign_staff', 'end_staff_assignment', 'payment_action', 'verify_payment', 'report_action',
   'set_event_status', 'confirm_order_item', 'set_external_accession', 'claim_task',
 ]);

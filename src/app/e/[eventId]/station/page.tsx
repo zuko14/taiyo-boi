@@ -72,7 +72,6 @@ export default async function StationPage({ params, searchParams }: { params: Pr
 
     const actions = (q: QA) => (
       <div className="row">
-        {q.state === 'queued' ? <RpcForm eventId={eventId} rpc="task_action" back={back} hidden={{ p_task: q.task_id, p_action: 'call', p_station: station.id }}><SubmitButton className="btn btn-ghost btn-sm">Call</SubmitButton></RpcForm> : null}
         {q.state !== 'in_service' ? <RpcForm eventId={eventId} rpc="task_action" back={back} ok="Service started" hidden={{ p_task: q.task_id, p_action: 'start', p_station: station.id }}><SubmitButton className="btn btn-solid btn-sm">Start</SubmitButton></RpcForm> : null}
         {q.state === 'in_service' ? <RpcForm eventId={eventId} rpc="task_action" back={back} ok="Completed — next step assigned" hidden={{ p_task: q.task_id, p_action: 'complete', p_station: station.id }}>
           <SubmitButton className="btn btn-green" confirm={`Confirm ${q.participant_tasks.service_name} is finished for ${q.registrations.registration_code}?`}>Complete</SubmitButton></RpcForm> : null}
@@ -100,8 +99,8 @@ export default async function StationPage({ params, searchParams }: { params: Pr
         <Card>
           <div className="row-between">
             <div style={{ flex: 1, minWidth: 260 }}><ScanBox action={base} hidden={{ at: station.id }} label="Scan participant tag to find their task here" /></div>
-            <RpcForm eventId={eventId} rpc="call_next" back={back} ok="Next participant called" hidden={{ p_station: station.id }}><SubmitButton className="btn btn-accent btn-lg">Call next</SubmitButton></RpcForm>
           </div>
+          <p className="small muted" style={{ margin: '10px 0 0' }}>The queue runs itself: participants are sent to the least-busy station and called here automatically as soon as you are free. Press <strong>Start</strong> when they arrive and <strong>Complete</strong> when done; use <strong>No-show</strong> if a called participant does not come.</p>
           {scannedReg ? (scannedRow ? <div className="alert alert-ok" style={{ marginTop: 12 }}>Found: {scannedRow.registrations.registration_code} — {scannedRow.participant_tasks.service_name} ({scannedRow.state}).</div>
             : other && other.state !== 'in_service' && capIds.has(other.participant_tasks.service_id) ? (
               <div className="alert alert-warn row-between" style={{ marginTop: 12 }}>
@@ -113,11 +112,11 @@ export default async function StationPage({ params, searchParams }: { params: Pr
         </Card>
         {[...(scannedRow ? [scannedRow] : []), ...serving, ...called].filter((q, i, a) => a.findIndex((x) => x.id === q.id) === i).map((q) => (
           <section key={q.id} className="glass next-step">
-            <div className="eyebrow">{q.state === 'in_service' ? `In service since ${dt(q.started_at, tz, false)}` : q.state === 'called' ? 'Called' : 'Scanned'}</div>
+            <div className="eyebrow">{q.state === 'in_service' ? `In service since ${dt(q.started_at, tz, false)}` : q.state === 'called' ? `Called automatically${q.called_at ? ` at ${dt(q.called_at, tz, false)}` : ''} — waiting for the participant` : 'Scanned'}</div>
             <div className="row-between" style={{ marginTop: 8 }}>{person(q)}{actions(q)}</div>
           </section>
         ))}
-        <Card title="Queue" sub={`Services: ${(caps ?? []).map((c) => (c.workflow_services as unknown as { name: string }).name).join(', ')}`}>
+        <Card title="Up next (called automatically in this order)" sub={`Services: ${(caps ?? []).map((c) => (c.workflow_services as unknown as { name: string }).name).join(', ')}`}>
           {waiting.length ? <ul className="list">{waiting.map((q) => <li key={q.id}>{person(q)}{actions(q)}</li>)}</ul> : <Empty>No one waiting.</Empty>}
         </Card>
       </>
