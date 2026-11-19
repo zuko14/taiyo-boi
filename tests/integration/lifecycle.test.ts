@@ -40,7 +40,13 @@ describe('pilot reset', () => {
     const a = fx.users.event_admin.client;
     const start = new Date(Date.now() - 60_000).toISOString(); const end = new Date(Date.now() + 3600_000).toISOString();
     await must(a.rpc('assign_staff', { p_station: fx.stations['REG-1'], p_user: fx.users.registration_staff.id, p_start: start, p_end: end }));
-    for (const code of ['REG-1', 'S-01', 'ECG-1', 'BMD-1', 'BC-1', 'XR-1', 'WI-1']) await must(a.rpc('station_set_status', { p_station: fx.stations[code], p_status: 'open', p_reason: null }));
+    await must(a.rpc('station_set_status', { p_station: fx.stations['REG-1'], p_status: 'open', p_reason: null }));
+    // reset cleared every shift: going live is refused until diagnostic stations are staffed again
+    expect(await rpcError(a.rpc('set_event_status', { p_event: fx.eventId, p_status: 'live', p_reason: null }))).toMatch(/no diagnostic station is open with staff on shift/);
+    for (const code of ['S-01', 'ECG-1', 'BMD-1', 'BC-1', 'XR-1', 'WI-1'])
+      await must(a.rpc('assign_staff', { p_station: fx.stations[code], p_user: code === 'WI-1' ? fx.users.walkin_staff.id : fx.users.station_staff.id, p_start: start, p_end: end }));
+    const opened = await must<{ status: string }[]>(db().from('stations').select('status').eq('event_id', fx.eventId).in('code', ['S-01', 'ECG-1', 'BMD-1']));
+    expect(opened.every((x) => x.status === 'open')).toBe(true);           // reopened automatically with their first shift
     await must(a.rpc('set_event_status', { p_event: fx.eventId, p_status: 'live', p_reason: null }));
     const again = await register(fx, 'female');
     expect(again.registration_code).toMatch(/-000001$/);
@@ -87,6 +93,29 @@ describe('catalogue and custom packages', () => {
 });
 
 describe('owner delete', () => {
+  it('cannot go live with no open, staffed diagnostic station', async () => {
+    const a = fx.platform.client;
+    const ev = await must<string>(a.rpc('create_event', { p_code: newCode('NOST'), p_name: 'No staff camp' }));
+    const svc = await must<{ id: string }>(a.from('workflow_services').insert({ event_id: ev, code: 'BLOOD', name: 'Blood', location: 'event_day' }).select('id').single());
+    const t = await must<{ id: string }>(a.from('test_catalog').insert({ event_id: ev, code: 'CBC', display_name: 'CBC', location: 'event_day' }).select('id').single());
+    await must(a.from('workflow_service_tests').insert({ event_id: ev, service_id: svc.id, test_id: t.id }));
+    const pkg = await must<string>(a.rpc('create_package', { p_event: ev, p_code: 'B', p_name: 'B', p_code_letter: 'B' }));
+    await must(a.from('package_tests').insert({ event_id: ev, package_id: pkg, test_id: t.id }));
+    await must(a.from('stations').insert({ event_id: ev, code: 'R1', name: 'Reg', kind: 'registration_counter' }));
+    const st = await must<{ id: string }>(a.from('stations').insert({ event_id: ev, code: 'S1', name: 'S1', kind: 'station' }).select('id').single());
+    await must(a.from('station_capabilities').insert({ event_id: ev, station_id: st.id, service_id: svc.id }));
+    expect(await rpcError(a.rpc('set_event_status', { p_event: ev, p_status: 'live', p_reason: null }))).toMatch(/no diagnostic station is open with staff on shift/);
+    const cov = await must<{ service_name: string; station_status: string; staff_now: number }[]>(a.rpc('service_coverage', { p_event: ev }));
+    expect(cov).toEqual([expect.objectContaining({ service_name: 'Blood', station_status: 'closed', staff_now: 0 })]);
+    await must(a.from('event_memberships').insert({ event_id: ev, user_id: fx.users.station_staff.id, role_code: 'station_staff', created_by: fx.platform.id }));
+    await must(a.rpc('assign_staff', { p_station: st.id, p_user: fx.users.station_staff.id, p_start: new Date(Date.now() - 60_000).toISOString(), p_end: new Date(Date.now() + 3600_000).toISOString() }));
+    await must(a.rpc('set_event_status', { p_event: ev, p_status: 'live', p_reason: null }));   // station opened with its first shift
+    // a station a supervisor closed is never reopened by assigning another shift
+    await must(a.rpc('station_set_status', { p_station: st.id, p_status: 'closed', p_reason: 'broken' }));
+    await must(a.rpc('assign_staff', { p_station: st.id, p_user: fx.users.station_staff.id, p_start: new Date(Date.now() - 60_000).toISOString(), p_end: new Date(Date.now() + 7200_000).toISOString() }));
+    expect((await must<{ status: string }>(db().from('stations').select('status').eq('id', st.id).single())).status).toBe('closed');
+  });
+
   it('only platform admins can delete, never while live, and everything goes', async () => {
     expect(await rpcError(fx.users.event_admin.client.rpc('delete_event', { p_event: fx.eventId, p_confirm_code: fx.eventCode }))).toMatch(/permission_denied/);
     expect(await rpcError(fx.platform.client.rpc('delete_event', { p_event: fx.eventId, p_confirm_code: fx.eventCode }))).toMatch(/event_live/);

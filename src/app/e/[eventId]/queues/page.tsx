@@ -12,23 +12,55 @@ export default async function Queues({ params }: { params: Promise<{ eventId: st
   const ctx = await requirePerm(eventId, 'queue.override', 'station.operate');
   const tz = ctx.event.timezone;
   const back = `/e/${eventId}/queues`;
-  const [{ data: stations }, { data: caps }, { data: problems }, { data: active }] = await Promise.all([
+  const [{ data: stations }, { data: caps }, { data: problems }, { data: active }, { data: coverage }] = await Promise.all([
     ctx.supabase.from('stations').select('id, code, name, kind, status, pause_reason').eq('event_id', eventId).in('kind', ['station', 'walkin_centre']).order('code'),
     ctx.supabase.from('station_capabilities').select('station_id, service_id').eq('event_id', eventId),
     ctx.supabase.from('participant_tasks').select('id, service_id, service_name, status, status_reason, waiting_since, updated_at, location, registration_id, registrations(registration_code, participants(full_name))')
       .eq('event_id', eventId).in('status', ['waiting_unassigned', 'exception', 'no_show']).order('updated_at').limit(200),
     ctx.supabase.from('queue_assignments').select('id, station_id, state, seq, task_id, participant_tasks(service_id, service_name), registrations(registration_code)')
       .eq('event_id', eventId).in('state', ['queued', 'called', 'in_service']).order('seq'),
+    ctx.supabase.rpc('service_coverage', { p_event: eventId }),
   ]);
+  type Cov = { service_id: string; service_name: string; station_id: string | null; station_code: string | null; station_name: string | null;
+    station_status: string | null; accepts: boolean | null; staff_now: number; next_shift: string | null; waiting: number };
+  const services = [...new Map(((coverage ?? []) as Cov[]).map((c) => [c.service_id, c])).values()].map((svc) => {
+    const rows = ((coverage ?? []) as Cov[]).filter((c) => c.service_id === svc.service_id && c.station_id);
+    const ready = rows.filter((r) => r.station_status === 'open' && r.accepts && r.staff_now > 0);
+    return { ...svc, rows, ready };
+  });
+  const blocked = services.filter((s) => !s.ready.length);
+  const why = (r: Cov) => [r.station_status !== 'open' ? r.station_status : null, r.accepts === false ? 'not accepting' : null,
+    r.staff_now ? null : r.next_shift ? `no staff until ${dt(r.next_shift, tz, false)}` : 'no staff shift'].filter(Boolean).join(', ');
   type Reg = { registration_code: string; participants?: { full_name: string } };
   const compatible = (serviceId: string) => (stations ?? []).filter((s) => s.kind === 'station' && s.status === 'open' && (caps ?? []).some((c) => c.station_id === s.id && c.service_id === serviceId));
 
   return (
     <>
-      <PageHead title="Queue control" meta="Open, pause or close stations; resolve waiting participants and exceptions. In-service participants are never moved automatically.">
+      <PageHead title="Queue control" meta="Assignment and calling are automatic (least-busy station first). Here you open, pause or close stations and resolve exceptions. In-service participants are never moved.">
         <LiveRefresh eventId={eventId} tables={['queue_assignments', 'stations', 'participant_tasks']} url={env().NEXT_PUBLIC_SUPABASE_URL} anonKey={env().NEXT_PUBLIC_SUPABASE_ANON_KEY} />
         {ctx.can('queue.override') ? <RpcForm eventId={eventId} rpc="rebalance_waiting" back={back} ok="Waiting participants re-checked" hidden={{ p_event: eventId }}><SubmitButton className="btn btn-ghost btn-sm">Re-run allocation</SubmitButton></RpcForm> : null}
       </PageHead>
+
+      <Card title="Station coverage" sub="The queue is automatic: a participant can only be sent to a station that is open and has staff on shift now. Every service needs at least one."
+        actions={blocked.length ? <span className="badge red">{blocked.length} service{blocked.length === 1 ? '' : 's'} cannot be served</span> : <span className="badge green">All services covered</span>}>
+        {services.length ? (
+          <div className="table-wrap"><table><thead><tr><th>Service</th><th>Ready stations</th><th>Waiting</th><th>Problem and fix</th></tr></thead>
+            <tbody>{services.map((s) => (
+              <tr key={s.service_id}>
+                <td className="strong">{s.service_name}</td>
+                <td>{s.ready.length ? s.ready.map((r) => `${r.station_code} (${r.staff_now} staff)`).join(', ') : <span className="badge red">none</span>}</td>
+                <td>{s.waiting || '—'}</td>
+                <td className="wrap small">{s.ready.length ? <span className="muted">OK</span>
+                  : !s.rows.length ? <>No station can do this service. <Link href={`/e/${eventId}/admin/stations`}>Map one in Stations &amp; counters</Link>.</>
+                  : <div className="stack">{s.rows.map((r) => (
+                      <div key={r.station_id} className="row" style={{ gap: 8 }}>
+                        <span><span className="mono">{r.station_code}</span>: {why(r)}</span>
+                        {ctx.can('station.operate') && r.station_status !== 'open' ? <RpcForm eventId={eventId} rpc="station_set_status" back={back} ok={`${r.station_name} opened`} hidden={{ p_station: r.station_id, p_status: 'open' }}><SubmitButton className="btn btn-green btn-sm">Open</SubmitButton></RpcForm> : null}
+                        {!r.staff_now ? <Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/admin/staff`}>Assign shift</Link> : null}
+                      </div>))}</div>}</td>
+              </tr>))}</tbody></table></div>
+        ) : <Empty>No event-day services configured.</Empty>}
+      </Card>
 
       <Card title="Needs attention" sub="Waiting with no compatible station, exceptions and no-shows">
         {problems?.length ? (

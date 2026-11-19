@@ -49,7 +49,8 @@ export default async function Dashboard({ params }: { params: Promise<{ eventId:
         <span className="small muted">DB {dbMs} ms</span>
       </PageHead>
 
-      {o.alerts.map((a, i) => <div key={i} className={`alert ${a.level === 'error' ? 'alert-err' : 'alert-warn'}`} role="alert">{a.text}</div>)}
+      {o.alerts.map((a, i) => <div key={i} className={`alert ${a.level === 'error' ? 'alert-err' : 'alert-warn'}`} role="alert">{a.text}
+        {/waiting with no compatible station|no staff on shift/.test(a.text) ? <> — <Link href={`/e/${eventId}/queues`}>see station coverage and fix</Link></> : null}</div>)}
 
       <div className="stats">
         <Stat label="Registered" value={r.total} hint={`${r.last_hour} in the last hour`} />

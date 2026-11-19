@@ -81,6 +81,11 @@ Dated 10 Nov 2026 unless noted. “Provisional” means configurable and awaitin
 - `_autoflow` runs at the end of every scheduling decision (registration, payment, completion, no-show, station open/close, shift changes, and the page-refresh nudge), inside the event advisory lock, so it is serialised with all queue writes. Ending a station's last shift now also re-routes its *called* participants. `call_next` was removed from the UI and the RPC allowlist.
 - No automatic no-show timer: a called participant who never arrives holds the slot until staff press No-show (a timeout needs an approved duration).
 
+## 2026-11-19 — queue readiness (root cause of live "No station free")
+
+- The scheduler only assigns to stations that are **open, accepting, and have staff on shift now** (CLAUDE.md §5.4). Live events could reach a state where no station qualified: new stations start closed, Reset closes stations and clears shifts, shifts expire. Going live only warned.
+- Now: (1) a never-opened station opens automatically when its first shift is assigned (supervisor-closed/paused stations never reopen by themselves); (2) going Live is refused while no diagnostic station is open with staff on shift; (3) Queue control shows per-service coverage with the exact missing piece and one-click Open / Assign shift; (4) `/api/health` reports `schema: outdated` if the app runs without its migrations.
+
 ## Open approvals (CLAUDE.md §20 highest priority)
 
 1. Lab Partner approval of catalogue, order codes, and test→visit grouping.

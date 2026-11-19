@@ -51,8 +51,11 @@ describe('pay-per-test registration', () => {
     for (const w of walk) await must(a.from('station_capabilities').insert({ event_id: ev, station_id: centre, service_id: w.id }));
     const check = await must<{ level: string; message: string }[]>(a.rpc('validate_event', { p_event: ev }));
     expect(check.filter((c) => c.level === 'error')).toEqual([]);   // no packages needed: priced tests suffice
-    // the blood station stays closed for now: patients must wait, then be picked up automatically
+    // a never-opened station opens with its first shift; going live needs one open staffed station
+    expect((await must<{ status: string }>(db().from('stations').select('status').eq('id', station).single())).status).toBe('open');
     await must(a.rpc('set_event_status', { p_event: ev, p_status: 'live', p_reason: null }));
+    // then the blood station closes: patients must wait, and be picked up automatically when it reopens
+    await must(a.rpc('station_set_status', { p_station: station, p_status: 'closed', p_reason: 'equipment check' }));
   });
 
   const regTests = async (ids: string[], classification = '') => must<{ registration_id: string; registration_code: string; tests_intent_id: string | null }>(

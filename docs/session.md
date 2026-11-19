@@ -386,3 +386,15 @@ This session implemented **four major architectural enhancements**:
 - **Cleanup:**
   - Removed manual `call_next` button from `src/app/e/[eventId]/station/page.tsx` and removed `call_next` from `rpc-action.ts` allowlist.
 
+### 5. Queue Readiness & Live Gate Guard (`20261119000015`)
+- **Root Cause Addressed:** The scheduler requires stations to be open, accepting, and staffed *right now*. Events could previously be set to `live` even when all diagnostic stations were closed or lacked active shifts, producing a "No station free / waiting with no compatible station" state.
+- **Database Changes:**
+  - `assign_staff`: A station that has never been opened now automatically opens upon its first staff shift assignment. (Stations manually closed or paused by a supervisor remain closed).
+  - `set_event_status`: Refuses switching status to `live` if no diagnostic station is open with staff on shift currently.
+  - `public.service_coverage(p_event uuid)`: Returns live per-service station readiness, active staffing count, next scheduled shift, and waiting queue counts.
+- **Application Changes:**
+  - `src/app/e/[eventId]/queues/page.tsx`: Added **Station coverage** card showing ready stations, waiting counts, missing requirements, and one-click **Open** / **Assign shift** actions.
+  - `src/app/e/[eventId]/page.tsx`: Added direct link on queue alerts to the Queue control coverage table.
+  - `src/app/api/health/route.ts`: Probes `service_coverage()` and reports `schema: outdated — apply supabase/migrations` if deployed without database migrations.
+
+
