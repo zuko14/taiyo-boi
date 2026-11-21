@@ -420,3 +420,7 @@ tr.selected { background: var(--accent-soft2); }
 .test-picker legend { padding: 0; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
 .test-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 8px 4px; min-height: 44px; border-bottom: 1px solid var(--border); }
 .test-row .test-price { font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }
+
+/* grid children may shrink below their content (long codes/labels wrap instead of widening the page) */
+.grid > * { min-width: 0; }
+.mono { overflow-wrap: anywhere; }

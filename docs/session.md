@@ -450,5 +450,26 @@ This session implemented **two major operational upgrades**:
 - **Revenue Insights:**
   - Added **"Latest verified payments"** table displaying participant name, items, payment method, amount, and receipt number.
 
+### 3. Staff Job Roles & Assignment Fix (`20261121000018`)
+- **Bug Fixed:** "Add role" previously failed with `permission denied for table event_memberships` for Event Admins because it executed an upsert (`on conflict update`), which PostgreSQL requires table update privileges on all columns for. Staff RLS only permits toggling `active`.
+- **Resolution:** Replaced with `grantRole`, which checks for existing membership rows and either reactivates an inactive row or inserts a new one with a default audit reason.
+- **New Clinical Job Roles:**
+  - `phlebotomist`: "Phlebotomist (sample collection)"
+  - `xray_tech`: "X-Ray / radiology technician"
+  - Both inherit the station technician operational permissions (`participant.view`, `queue.view`, `task.perform`), with specific duty locations determined by their assigned station shifts.
+- **Permissions Management:**
+  - Re-organized Permissions screen to group permissions by functional area with plain descriptions and show all staff members holding each role.
+
+### 4. Package Builder & Pay-Per-Test Safeguards (`20261121000019`)
+- **Interactive Package Builder (`src/components/PackageTestPicker.tsx`):**
+  - Allows Event Admins to construct custom packages by ticking tests from the catalogue with real-time search, category grouping, category "Select all", and individual value calculation ("worth ₹X individually").
+  - Saves selections atomically in one step (`setPackageTests`), validating that added tests are active and mapped to a workflow visit.
+- **Pay-Per-Test Package Guard:**
+  - Database trigger `pay_per_test_guard` ensures the automatic `PAY_PER_TEST` package can never have tests attached or a price assigned.
+  - Ensures a-la-carte patients only receive and pay for the specific tests selected at the counter.
+- **Registration Screen UI:**
+  - Package selection cards on the registration desk now list all included tests under each package.
+
+
 
 

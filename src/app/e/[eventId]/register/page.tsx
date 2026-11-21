@@ -41,6 +41,9 @@ export default async function RegisterPage({ params, searchParams }: { params: P
   const packageTests: Record<string, string[]> = {};
   for (const x of pkgTests ?? []) { const c = (x.packages as unknown as { classification: string }).classification; (packageTests[c] ??= []).push(x.test_id); }
   const pkgChoices = (packages ?? []).filter((p) => p.classification !== 'pay_per_test');
+  // what each package contains, shown on its card so the desk can tell the patient
+  const { data: contents } = await ctx.supabase.from('package_tests').select('package_id, test_catalog(display_name)').eq('event_id', eventId);
+  const testsOf = (pkgId: string) => (contents ?? []).filter((c) => c.package_id === pkgId).map((c) => (c.test_catalog as unknown as { display_name: string }).display_name).sort();
 
   const checked = sp.checked === '1';
   const dupes = checked && (sp.employee_id || sp.mobile || sp.name)
@@ -51,8 +54,9 @@ export default async function RegisterPage({ params, searchParams }: { params: P
     <>
       <PageHead title="Registration desk" meta={ctx.event.status !== 'live' ? <span className="badge amber">Event is {ctx.event.status}: registration is blocked until it is live</span> : 'Search first, then register once.'} />
       <div className={`alert ${sponsored ? 'alert-info' : 'alert-warn'}`} role="note">
-        {sponsored ? <><strong>Sponsored camp</strong> — the organiser pays. Participants pay nothing here.</>
-          : <><strong>Patients pay at registration</strong> — pick their tests or package, then collect by UPI QR{(ctx.event.settings.payment_methods as string[] | undefined)?.includes('cash') ? ' or cash' : ''} on the next screen. Tests start only after the payment is confirmed.</>}
+        {/* one span: .alert is a flex row, so bare text and <strong> would become separate columns */}
+        {sponsored ? <span><strong>Sponsored camp</strong> — the organiser pays. Participants pay nothing here.</span>
+          : <span><strong>Patients pay at registration</strong> — pick their tests or package, then collect by UPI QR{(ctx.event.settings.payment_methods as string[] | undefined)?.includes('cash') ? ' or cash' : ''} on the next screen. Tests start only after the payment is confirmed.</span>}
       </div>
       <DutyPicker stations={stations} base={base} title="Counter" current={counter} />
       {counter ? (
@@ -99,6 +103,7 @@ export default async function RegisterPage({ params, searchParams }: { params: P
                       <input type="radio" name="classification" value={p.classification} required={!sellTests || !pickTests.length} disabled={!p.active} />
                       <span className="title">{classLabel(p.classification)}</span>
                       <span className="small text2">{p.name}</span>
+                      {testsOf(p.id).length ? <span className="small muted" title={testsOf(p.id).join(', ')}>{testsOf(p.id).length} tests: {testsOf(p.id).slice(0, 5).join(', ')}{testsOf(p.id).length > 5 ? ` +${testsOf(p.id).length - 5} more` : ''}</span> : null}
                       <span className="small muted">{sponsored ? 'Sponsored · participant pays ₹0' : p.price_paise ? `Participant pays ${inr(p.price_paise)}` : 'Free for the participant'}</span>
                     </label>
                   ))}

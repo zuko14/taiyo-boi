@@ -4,7 +4,8 @@ import { Card, PageHead } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
 import Link from 'next/link';
 import { classLabel, inr, locationLabel } from '@/lib/format';
-import { addPackageTest, createPackage, deletePackage, removePackageTest, saveChoiceGroup, savePackage, savePackageTest, saveService, setPackageRate } from '../actions';
+import { PackageTestPicker } from '@/components/PackageTestPicker';
+import { addPackageTest, setPackageTests, createPackage, deletePackage, removePackageTest, saveChoiceGroup, savePackage, savePackageTest, saveService, setPackageRate } from '../actions';
 
 type Svc = { id: string; code: string; name: string; location: string; priority: number; est_minutes: number | null; instructions: string; active: boolean };
 
@@ -18,12 +19,13 @@ export default async function Packages({ params }: { params: Promise<{ eventId: 
   const [{ data: pkgs }, { data: pts }, { data: tests }, { data: groups }, { data: services }, { data: map }, { data: checks }] = await Promise.all([
     ctx.supabase.from('packages').select('*').eq('event_id', eventId).order('classification'),
     ctx.supabase.from('package_tests').select('*').eq('event_id', eventId),
-    ctx.supabase.from('test_catalog').select('id, code, display_name, location, active, archived').eq('event_id', eventId).order('display_name'),
+    ctx.supabase.from('test_catalog').select('id, code, display_name, category, location, active, archived').eq('event_id', eventId).order('category').order('display_name'),
     ctx.supabase.from('choice_groups').select('*').eq('event_id', eventId),
     ctx.supabase.from('workflow_services').select('*').eq('event_id', eventId).order('location').order('priority').order('name'),
     ctx.supabase.from('workflow_service_tests').select('test_id, service_id').eq('event_id', eventId),
     ctx.supabase.rpc('validate_event', { p_event: eventId }),
   ]);
+  const { data: prices } = await ctx.supabase.from('addon_prices').select('test_id, price_paise, created_at').eq('event_id', eventId).eq('active', true).order('created_at', { ascending: false });
   const test = (id: string) => (tests ?? []).find((t) => t.id === id);
   const svcName = (id?: string) => (services ?? []).find((s) => s.id === id)?.name;
   const svcOfTest = (id: string) => (map ?? []).find((m) => m.test_id === id)?.service_id;
@@ -57,6 +59,17 @@ export default async function Packages({ params }: { params: Promise<{ eventId: 
         const plan = new Map<string, string[]>();
         for (const l of plain) { const k = svcName(svcOfTest(l.test_id)) ?? 'UNMAPPED'; plan.set(k, [...(plan.get(k) ?? []), test(l.test_id)?.display_name ?? '?']); }
         for (const g of pg) plan.set(`${svcName(g.service_id)} (choice: ${g.name})`, lines.filter((l) => l.choice_group_id === g.id).map((l) => test(l.test_id)?.display_name ?? '?'));
+        if (p.code === 'PAY_PER_TEST') return (
+          <Card key={p.id} title={`${p.name} · automatic`} sub={`Used for patients who register for individual tests only. It has no tests of its own and is always free — patients pay for exactly the tests picked at the desk. Registration codes use letter “${p.code_letter}”.`}>
+            <AdminForm action={savePackage} eventId={eventId} back={back} live={live} hidden={{ id: p.id, description: p.description, eligibility_note: p.eligibility_note, active: p.active ? 'on' : undefined }} className="row" style={{ alignItems: 'flex-end' }}>
+              <div className="field" style={{ marginBottom: 0 }}><label>Name</label><input name="name" defaultValue={p.name} required /></div>
+              <div className="field" style={{ marginBottom: 0 }}><label>Code letter</label><input name="code_letter" defaultValue={p.code_letter} pattern="[A-Za-z]{1,3}" required /></div>
+              {canPkg ? <SubmitButton className="btn btn-ghost btn-sm">Save</SubmitButton> : null}
+            </AdminForm>
+          </Card>);
+        const pickTests = (tests ?? []).filter((t) => (t.active && !t.archived) || lines.some((l) => l.test_id === t.id)).map((t) => ({
+          id: t.id, name: t.display_name, category: t.category, walkIn: t.location === 'walk_in', visit: svcName(svcOfTest(t.id)) ?? null,
+          price_paise: (prices ?? []).find((x) => x.test_id === t.id)?.price_paise ?? null }));
         return (
           <Card key={p.id} title={custom ? `${p.name} · ${p.code}` : `${classLabel(p.classification)} · ${p.name}`}
             sub={`Registration codes use letter “${p.code_letter}”. ${custom ? (p.price_paise ? `Participant pays ${inr(p.price_paise)} (collected at registration).` : 'Free for the participant.') : 'Employee charge: ₹0.'}${!p.active ? ' Inactive.' : ''}`}>
@@ -108,11 +121,19 @@ export default async function Packages({ params }: { params: Promise<{ eventId: 
                     </details>
                   </li>); })}</ul>
                 {canMap ? (
+                  <details style={{ marginTop: 10 }} open={!plain.length}>
+                    <summary className="btn btn-solid btn-sm">{plain.length ? 'Choose tests for this package' : 'Add tests to this package'}</summary>
+                    <AdminForm action={setPackageTests} eventId={eventId} back={back} live={live} hidden={{ package_id: p.id }} style={{ marginTop: 10 }}>
+                      <PackageTestPicker tests={pickTests} initial={plain.map((l) => l.test_id)} />
+                      <SubmitButton className="btn btn-solid" confirm="Save this package's tests? New registrations get the new list; existing ones keep theirs.">Save package tests</SubmitButton>
+                    </AdminForm>
+                  </details>) : null}
+                {canMap && pg.length ? (
                   <AdminForm action={addPackageTest} eventId={eventId} back={back} live={live} hidden={{ package_id: p.id }} className="row" style={{ marginTop: 10 }}>
-                    <select name="test_id" className="input" required style={{ flex: 1 }} aria-label="Test to add">
+                    <select name="test_id" className="input" required style={{ flex: 1 }} aria-label="Test to add as a choice option">
                       {(tests ?? []).filter((t) => t.active && !t.archived && !lines.some((l) => l.test_id === t.id)).map((t) => <option key={t.id} value={t.id}>{t.display_name}</option>)}</select>
-                    <select name="choice_group_id" className="input" style={{ width: 170 }} aria-label="Choice group"><option value="">Standalone</option>{pg.map((g) => <option key={g.id} value={g.id}>Option in {g.name}</option>)}</select>
-                    <SubmitButton className="btn btn-ghost btn-sm">Add</SubmitButton>
+                    <select name="choice_group_id" className="input" required style={{ width: 190 }} aria-label="Choice group">{pg.map((g) => <option key={g.id} value={g.id}>Option in {g.name}</option>)}</select>
+                    <SubmitButton className="btn btn-ghost btn-sm">Add option</SubmitButton>
                   </AdminForm>) : null}
                 {canMap ? <p className="small muted" style={{ marginTop: 6 }}>Test missing? <Link href={`/e/${eventId}/admin/catalog`}>Create it in the test catalogue</Link> and map it to a workflow service, then add it here.</p> : null}
                 <div className="label" style={{ margin: '16px 0 8px' }}>Choice groups</div>

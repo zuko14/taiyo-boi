@@ -13,14 +13,20 @@ export default async function Staff({ params }: { params: Promise<{ eventId: str
   const tz = ctx.event.timezone;
   const back = `/e/${eventId}/admin/staff`;
   const live = isLive(ctx.event.status);
-  const [{ data: people }, { data: members }, { data: roles }, { data: stations }, { data: shifts }] = await Promise.all([
+  const [{ data: people }, { data: members }, { data: roles }, { data: stations }, { data: shifts }, { data: caps }] = await Promise.all([
     ctx.supabase.rpc('staff_directory', { p_event: eventId }),
     ctx.supabase.from('event_memberships').select('id, user_id, role_code, active').eq('event_id', eventId),
     ctx.supabase.from('roles').select('code, name').order('name'),
     ctx.supabase.from('stations').select('id, code, name, kind').eq('event_id', eventId).order('code'),
     ctx.supabase.from('staff_assignments').select('id, user_id, station_id, shift_start, shift_end, status').eq('event_id', eventId).order('shift_start', { ascending: false }).limit(300),
+    ctx.supabase.from('station_capabilities').select('station_id, workflow_services(name)').eq('event_id', eventId),
   ]);
   type Person = { user_id: string; full_name: string; email: string; roles: string[] };
+  const roleName = (code: string) => (roles ?? []).find((r) => r.code === code)?.name ?? code.replace(/_/g, ' ');
+  const does = (stationId: string, kind: string) => {
+    const v = (caps ?? []).filter((c) => c.station_id === stationId).map((c) => (c.workflow_services as unknown as { name: string }).name);
+    return v.length ? v.join(', ') : ({ registration_counter: 'registration', addon_desk: 'add-on / payment desk', station: 'no visit set', walkin_centre: 'walk-in centre' } as Record<string, string>)[kind] ?? kind;
+  };
   const ppl = (people ?? []) as Person[];
   const name = (id: string) => ppl.find((p) => p.user_id === id)?.full_name ?? id.slice(0, 8);
   const st = (id: string) => (stations ?? []).find((s) => s.id === id)?.name ?? '?';
@@ -34,8 +40,9 @@ export default async function Staff({ params }: { params: Promise<{ eventId: str
       <Card title="Assign a shift">
         <RpcForm eventId={eventId} rpc="assign_staff" back={back} ok="Shift assigned">
           <div className="form-row">
-            <div className="field"><label>Staff member</label><select name="p_user" required>{ppl.map((p) => <option key={p.user_id} value={p.user_id}>{p.full_name} · {p.roles.join(', ')}</option>)}</select></div>
-            <div className="field"><label>Counter / station</label><select name="p_station" required>{(stations ?? []).map((s) => <option key={s.id} value={s.id}>{s.name} ({s.kind.replace('_', ' ')})</option>)}</select></div>
+            <div className="field"><label>Staff member</label><select name="p_user" required>{ppl.map((p) => <option key={p.user_id} value={p.user_id}>{p.full_name} · {p.roles.map(roleName).join(', ')}</option>)}</select></div>
+            <div className="field"><label>Counter / station</label><select name="p_station" required>{(stations ?? []).map((s) => <option key={s.id} value={s.id}>{s.name} — {does(s.id, s.kind)}</option>)}</select>
+              <span className="help">Phlebotomists → a sample collection station; X-Ray technicians → an X-Ray station. The shift decides where the person works and what they see.</span></div>
             <div className="field"><label>Shift start</label><input type="datetime-local" name="p_start_local" required defaultValue={startDefault} /></div>
             <div className="field"><label>Shift end</label><input type="datetime-local" name="p_end_local" required defaultValue={endDefault} /></div>
           </div>
@@ -63,18 +70,20 @@ export default async function Staff({ params }: { params: Promise<{ eventId: str
               <SubmitButton>Create account</SubmitButton>
             </AdminForm>
           </Card>
+          {/* role add/remove: the server records a standard audit reason, so no per-row reason box */}
           <Card title="Staff and roles">
             <ul className="list">{ppl.map((p) => (
               <li key={p.user_id} style={{ display: 'block' }}>
                 <div className="row-between"><span><span className="strong">{p.full_name}</span> <span className="small muted">{p.email}</span></span></div>
                 <div className="row" style={{ marginTop: 6 }}>
                   {(members ?? []).filter((m) => m.user_id === p.user_id).map((m) => (
-                    <AdminForm key={m.id} action={setMembershipActive} eventId={eventId} back={back} live={live} hidden={{ id: m.id, active: m.active ? 'false' : 'true' }} className="row">
-                      <span className={`badge ${m.active ? 'green' : ''}`}>{m.role_code.replace(/_/g, ' ')}</span>
-                      {m.user_id !== ctx.user.id ? <button className="btn btn-ghost btn-sm">{m.active ? 'Deactivate' : 'Reactivate'}</button> : null}
+                    <AdminForm key={m.id} action={setMembershipActive} eventId={eventId} back={back} live={false} hidden={{ id: m.id, active: m.active ? 'false' : 'true' }} className="row">
+                      <span className={`badge ${m.active ? 'green' : ''}`} style={m.active ? undefined : { textDecoration: 'line-through' }}>{roleName(m.role_code)}</span>
+                      {m.user_id !== ctx.user.id ? <button className="btn btn-ghost btn-sm" aria-label={`${m.active ? 'Remove' : 'Restore'} ${roleName(m.role_code)} for ${p.full_name}`}>{m.active ? 'Remove' : 'Restore'}</button> : null}
                     </AdminForm>))}
-                  <AdminForm action={addRole} eventId={eventId} back={back} live={live} hidden={{ user_id: p.user_id }} className="row">
-                    <select name="role" className="input" style={{ width: 170, padding: '6px 10px' }} aria-label="Add role">{(roles ?? []).filter((r) => r.code !== 'event_admin' || ctx.can('permissions.manage')).map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}</select>
+                  <AdminForm action={addRole} eventId={eventId} back={back} live={false} hidden={{ user_id: p.user_id }} className="row">
+                    <select name="role" className="input" style={{ width: 220, padding: '6px 10px' }} aria-label={`Add a role for ${p.full_name}`}>{(roles ?? []).filter((r) => (r.code !== 'event_admin' || ctx.can('permissions.manage'))
+                      && !(members ?? []).some((m) => m.user_id === p.user_id && m.role_code === r.code && m.active)).map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}</select>
                     <button className="btn btn-ghost btn-sm">Add role</button>
                   </AdminForm>
                 </div>

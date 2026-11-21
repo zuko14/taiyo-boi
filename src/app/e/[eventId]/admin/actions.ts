@@ -137,6 +137,34 @@ export async function addPackageTest(fd: FormData) {
   done(error, 'Test added to package (applies to new registrations)');
 }
 
+/** Replace a package's plain test list with the ticked tests (choice-group options are untouched). */
+export async function setPackageTests(fd: FormData) {
+  const { eventId, db, done, back } = await admin(fd, 'Package tests updated');
+  const pkgId = str(fd, 'package_id');
+  const want = [...new Set(fd.getAll('test_ids').map(String).filter(Boolean))];
+  const [{ data: pkg }, { data: cur }, { data: tests }, { data: map }] = await Promise.all([
+    db.from('packages').select('code, name').eq('id', pkgId).eq('event_id', eventId).single(),
+    db.from('package_tests').select('id, test_id').eq('package_id', pkgId).is('choice_group_id', null),
+    want.length ? db.from('test_catalog').select('id, display_name, active, archived').eq('event_id', eventId).in('id', want) : Promise.resolve({ data: [] }),
+    want.length ? db.from('workflow_service_tests').select('test_id').eq('event_id', eventId).in('test_id', want) : Promise.resolve({ data: [] }),
+  ]);
+  if (!pkg) go(back, 'err', 'Package not found.');
+  if (pkg.code === 'PAY_PER_TEST') go(back, 'err', 'The Pay per test package has no tests of its own.');
+  if ((tests ?? []).length !== want.length) go(back, 'err', 'Some selected tests no longer exist. Reload the page and try again.');
+  const have = new Set((cur ?? []).map((c) => c.test_id));
+  const drop = (cur ?? []).filter((c) => !want.includes(c.test_id)).map((c) => c.id);
+  const add = want.filter((id) => !have.has(id));
+  // only newly added tests are checked; tests already in the package may stay as they are
+  const adding = (tests ?? []).filter((t) => add.includes(t.id));
+  const bad = adding.filter((t) => !t.active || t.archived).map((t) => t.display_name);
+  if (bad.length) go(back, 'err', `Inactive or archived tests cannot be added: ${bad.join(', ')}`);
+  const unlinked = adding.filter((t) => !(map ?? []).some((m) => m.test_id === t.id)).map((t) => t.display_name);
+  if (unlinked.length) go(back, 'err', `Link these tests to a visit in the Test catalogue first, otherwise they cannot be queued: ${unlinked.join(', ')}`);
+  if (drop.length) { const { error } = await db.from('package_tests').delete().in('id', drop); if (error) go(back, 'err', friendlyError(error)); }
+  if (add.length) { const { error } = await db.from('package_tests').insert(add.map((test_id) => ({ event_id: eventId, package_id: pkgId, test_id }))); if (error) go(back, 'err', friendlyError(error)); }
+  done(null, `${pkg.name}: ${add.length} added, ${drop.length} removed (applies to new registrations).`);
+}
+
 export async function savePackageTest(fd: FormData) {
   const { db, done } = await admin(fd);
   const { error } = await db.from('package_tests').update({ priority: intOrNull(fd, 'priority') ?? 100, fasting_required: bool(fd, 'fasting_required'),
@@ -224,17 +252,30 @@ export async function createStaff(fd: FormData) {
     const { error } = await svc.from('staff_profiles').insert({ user_id: userId, email, full_name: str(fd, 'full_name') });
     if (error) go(back, 'err', friendlyError(error));
   }
-  const { error } = await db.from('event_memberships').insert({ event_id: eventId, user_id: userId, role_code: str(fd, 'role'), created_by: ctx.user.id });
+  const error = await grantRole(db, eventId, userId!, str(fd, 'role'), ctx.user.id);
   if (error) go(back, 'err', friendlyError(error));
   await svc.from('audit_logs').insert({ event_id: eventId, actor_id: ctx.user.id, action: 'staff.create', entity_type: 'staff', entity_id: userId, meta: { email, role: str(fd, 'role') } });
   go(back, 'ok', `Staff account ready for ${email}. Share the initial password privately and ask them to change it.`);
 }
 
+/**
+ * Give a person a role: reactivate it if they had it before, otherwise add it. A person can hold any
+ * number of roles. (Not an upsert: staff may only toggle `active`, and an upsert's ON CONFLICT
+ * UPDATE needs update rights on every column, which failed with "permission denied".)
+ */
+async function grantRole(db: Awaited<ReturnType<typeof createClient>>, eventId: string, userId: string, role: string, actor: string) {
+  const { data: cur, error: readErr } = await db.from('event_memberships').select('id, active')
+    .eq('event_id', eventId).eq('user_id', userId).eq('role_code', role).maybeSingle();
+  if (readErr) return readErr;
+  if (cur?.active) return null;
+  const { error } = cur ? await db.from('event_memberships').update({ active: true }).eq('id', cur.id)
+    : await db.from('event_memberships').insert({ event_id: eventId, user_id: userId, role_code: role, created_by: actor });
+  return error;
+}
+
 export async function addRole(fd: FormData) {
   const { eventId, ctx, db, done } = await admin(fd, 'Staff role added');
-  const { error } = await db.from('event_memberships').upsert({ event_id: eventId, user_id: str(fd, 'user_id'), role_code: str(fd, 'role'), active: true, created_by: ctx.user.id },
-    { onConflict: 'event_id,user_id,role_code' });
-  done(error, 'Role added');
+  done(await grantRole(db, eventId, str(fd, 'user_id'), str(fd, 'role'), ctx.user.id), 'Role added');
 }
 
 export async function setMembershipActive(fd: FormData) {

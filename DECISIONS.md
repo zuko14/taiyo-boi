@@ -100,6 +100,19 @@ Dated 10 Nov 2026 unless noted. “Provisional” means configurable and awaitin
 - Revenue insights list the latest payments (patient, what was paid for, method, amount, receipt).
 - New camps no longer inherit Bank of India labels: sponsor defaults to empty and the registration prefix comes from the event code; the BOI template sets both.
 
+## 2026-11-21 — staff roles
+
+- **Bug fixed**: "Add role" failed with *permission denied for table event_memberships* for every event admin. It used an upsert, whose ON CONFLICT UPDATE needs update rights on all columns; staff may only toggle `active`. Now `grantRole` reactivates an old role or inserts a new one. A person can hold any number of roles (permissions are the union).
+- New job roles **Phlebotomist (sample collection)** and **X-Ray / radiology technician**, with the station technician's permissions; where they work comes from their shift. Existing events got them too. Role names/descriptions rewritten in plain words.
+- Role permissions are evaluated live (`has_perm`), so editing a role applies at once to everyone holding it; the Permissions screen groups permissions by area with plain descriptions and shows who holds the role.
+- Role add/remove no longer shows a per-row "reason" box on live events: the server records a standard audit reason.
+
+## 2026-11-21 — package builder
+
+- Packages are built by ticking tests from the whole catalogue (search, category groups, select-all per category, "worth ₹X individually"), saved in one step (`setPackageTests`: adds and removes plain lines; choice-group options untouched). Newly added tests must be active and linked to a visit, so a package can never contain an un-queueable test.
+- Registration package cards list their tests.
+- The automatic **Pay per test** package can never hold tests or a price (database trigger + `set_package_rate` guard); migration 19 removes any that were added, so tests-only patients get exactly what they pick. Existing registrations keep their snapshot.
+
 ## Open approvals (CLAUDE.md §20 highest priority)
 
 1. Lab Partner approval of catalogue, order codes, and test→visit grouping.
