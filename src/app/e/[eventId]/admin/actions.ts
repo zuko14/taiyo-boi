@@ -39,26 +39,46 @@ export async function saveEventProfile(fd: FormData) {
 }
 
 export async function saveEventSettings(fd: FormData) {
-  const { eventId, ctx, db, done, back } = await admin(fd);
-  const vpa = str(fd, 'upi_vpa');
-  if (vpa && !VPA_RE.test(vpa)) go(back, 'err', 'The UPI ID does not look valid (expected something like labname@okicici).');
-  const methods = fd.getAll('payment_methods').map(String).filter(Boolean);
-  const extra = str(fd, 'payment_methods_extra').split(',').map((m) => m.trim().toLowerCase().replace(/[^a-z0-9_]/g, '')).filter(Boolean);
+  const { eventId, ctx, db, done } = await admin(fd);
+  // payment model, methods and UPI details are saved by savePaymentSetup and kept here as they are
   const settings = {
     ...ctx.event.settings,
     require_consent: bool(fd, 'require_consent'), payment_maker_checker: bool(fd, 'payment_maker_checker'),
     report_maker_checker: bool(fd, 'report_maker_checker'), portal_otp_required: true,
-    grouping_approved: bool(fd, 'grouping_approved'), payment_methods: [...new Set([...methods, ...extra])],
-    payment_instructions: str(fd, 'payment_instructions'), upi_vpa: vpa, upi_payee_name: str(fd, 'upi_payee_name').slice(0, 60),
-    default_service_minutes: intOrNull(fd, 'default_service_minutes') ?? 5,
+    grouping_approved: bool(fd, 'grouping_approved'), default_service_minutes: intOrNull(fd, 'default_service_minutes') ?? 5,
     label: { width_mm: intOrNull(fd, 'label_w') ?? 90, height_mm: intOrNull(fd, 'label_h') ?? 55, show_age: bool(fd, 'label_show_age') },
   };
   const { error } = await db.from('events').update({ settings }).eq('id', eventId);
   done(error, 'Settings saved');
 }
 
+/** Who pays at this camp, and how on-the-spot payments are received (UPI QR / cash). */
+export async function savePaymentSetup(fd: FormData) {
+  const { eventId, ctx, db, done, back } = await admin(fd);
+  const fixed = ctx.event.settings.package_mode === 'female_male';
+  const model = fixed ? 'sponsored' : str(fd, 'payment_model') === 'sponsored' ? 'sponsored' : 'patient_pays';
+  const vpa = str(fd, 'upi_vpa').toLowerCase();
+  if (vpa && !VPA_RE.test(vpa)) go(back, 'err', 'The UPI ID does not look valid. It looks like name@bank, e.g. taiyolabs@okicici — copy it exactly from the bank or UPI app.');
+  const payee = str(fd, 'upi_payee_name').slice(0, 60);
+  if (vpa && !payee) go(back, 'err', 'Enter the account holder name exactly as the bank shows it, so patients can check whom they are paying.');
+  const extra = str(fd, 'payment_methods_extra').split(',').map((m) => m.trim().toLowerCase().replace(/[^a-z0-9_]/g, '')).filter(Boolean);
+  // UPI by QR is a verifiable method only when a UPI ID is set; cash is opt-in
+  const methods = [...new Set([...(bool(fd, 'accept_cash') ? ['cash'] : []), ...(vpa ? ['upi_manual'] : []), ...extra])];
+  if (model === 'patient_pays' && !methods.length) go(back, 'err', 'Patients pay at this camp: add a UPI ID and/or accept cash, otherwise no payment can be confirmed.');
+  const settings = { ...ctx.event.settings, payment_model: model, upi_vpa: vpa, upi_payee_name: payee, payment_methods: methods,
+    payment_instructions: str(fd, 'payment_instructions') };
+  const { error } = await db.from('events').update({ settings }).eq('id', eventId);
+  done(error, 'Payment setup saved');
+}
+
 export async function saveTest(fd: FormData) {
   const { eventId, ctx, db, done, back } = await admin(fd);
+  // a visit typed on the test form is created (or reused) first
+  if (str(fd, 'new_service')) {
+    const { data: sid, error } = await db.rpc('ensure_service', { p_event: eventId, p_name: str(fd, 'new_service'), p_location: str(fd, 'location') || 'event_day' });
+    if (error) go(back, 'err', friendlyError(error));
+    fd.set('service_id', sid as string);
+  }
   const id = strOrNull(fd, 'id');
   const row = {
     event_id: eventId, code: str(fd, 'code').toUpperCase(), display_name: str(fd, 'display_name'), category: str(fd, 'category'),
@@ -159,15 +179,26 @@ export async function deactivatePrice(fd: FormData) {
 export async function saveStation(fd: FormData) {
   const { eventId, db, done, back } = await admin(fd);
   const id = strOrNull(fd, 'id');
+  const kind = id ? (await db.from('stations').select('kind').eq('id', id).single()).data?.kind : str(fd, 'kind');
+  // validate and resolve the services first, so a rejected form never leaves a half-saved station
+  const want = new Set(fd.getAll('caps').map(String));
+  if (fd.has('caps_present')) {
+    const fresh = str(fd, 'new_service');   // e.g. "X-Ray" or "Blood sample collection", created or reused
+    if (!want.size && !fresh) go(back, 'err', `Choose or type at least one service for ${str(fd, 'name') || 'this station'} — a station without a service can never receive participants.`);
+    if (fresh) {
+      const { data: sid, error } = await db.rpc('ensure_service', { p_event: eventId, p_name: fresh, p_location: kind === 'walkin_centre' ? 'walk_in' : 'event_day' });
+      if (error) go(back, 'err', friendlyError(error));
+      want.add(sid as string);
+    }
+  }
   const row = { name: str(fd, 'name'), location: str(fd, 'location'), instructions: str(fd, 'instructions'), address: str(fd, 'address'),
     operating_hours: str(fd, 'operating_hours'), valid_from: strOrNull(fd, 'valid_from'), valid_to: strOrNull(fd, 'valid_to'),
     capacity: intOrNull(fd, 'capacity') ?? 1, avg_service_minutes: intOrNull(fd, 'avg_service_minutes'), max_queue: intOrNull(fd, 'max_queue'),
     accepts_assignments: bool(fd, 'accepts_assignments') };
   const res = id ? await db.from('stations').update(row).eq('id', id).select('id').single()
-    : await db.from('stations').insert({ ...row, event_id: eventId, code: str(fd, 'code').toUpperCase(), kind: str(fd, 'kind') }).select('id').single();
+    : await db.from('stations').insert({ ...row, event_id: eventId, code: str(fd, 'code').toUpperCase(), kind }).select('id').single();
   if (res.error) go(back, 'err', friendlyError(res.error));
   if (fd.has('caps_present')) {
-    const want = new Set(fd.getAll('caps').map(String));
     const { data: cur } = await db.from('station_capabilities').select('service_id').eq('station_id', res.data!.id);
     const have = new Set((cur ?? []).map((c) => c.service_id));
     for (const s of have) if (!want.has(s)) { const { error } = await db.from('station_capabilities').delete().eq('station_id', res.data!.id).eq('service_id', s); if (error) go(back, 'err', friendlyError(error)); }
@@ -307,4 +338,10 @@ export async function importCatalog(fd: FormData) {
   if (error) go(back, 'err', friendlyError(error));
   const d = data as { created: number; updated: number; prices_changed: number };
   done(null, `Imported: ${d.created} new, ${d.updated} updated, ${d.prices_changed} price change(s).`);
+}
+
+export async function deleteStation(fd: FormData) {
+  const { db, done } = await admin(fd, 'Station deleted');
+  const { error } = await db.rpc('delete_station', { p_station: str(fd, 'id'), p_reason: strOrNull(fd, 'reason') });
+  done(error, 'Station deleted');
 }

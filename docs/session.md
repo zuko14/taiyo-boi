@@ -397,4 +397,58 @@ This session implemented **four major architectural enhancements**:
   - `src/app/e/[eventId]/page.tsx`: Added direct link on queue alerts to the Queue control coverage table.
   - `src/app/api/health/route.ts`: Probes `service_coverage()` and reports `schema: outdated — apply supabase/migrations` if deployed without database migrations.
 
+---
+
+# Engineering Session Log — 2026-11-21
+
+**Repository:** `boi-taiyo` (`https://github.com/zuko14/taiyo-boi`)  
+**Base Commit:** `eacd9a2`  
+**Session Status:** Verified locally (unit tests, typecheck, and Next.js production build passing). Migrations `20261121000016` and `20261121000017` applied to hosted Supabase (`sgnflkglfkoqvfzjbrnr`); committed and pushed to `origin/main` for Render deployment.
+
+---
+
+## Executive Summary
+
+This session implemented **two major operational upgrades**:
+
+1. **Station Setup for Any Camp (`20261121000016_station_setup.sql`)** — Streamlined counter and diagnostic station setup so any camp can create visits/services on the fly (`ensure_service`), auto-mapping blood/sample services to a shared `SAMPLE` visit. Added safe `delete_station` for unused stations and strict validation preventing unmapped stations.
+2. **Payment Model, On-the-Spot Collection & First Station Guidance (`20261121000017_payment_model.sql`)** —
+   - Added explicit `settings.payment_model`: **`patient_pays`** (default for custom camps) vs **`sponsored`** (BOI template default).
+   - Added a unified **"Payments at this camp"** configuration card on Event & readiness with live ₹1 test QR code.
+   - Enhanced registration result screen: displays immediate **"Send the participant to"** guidance with live first station, queue position, and ticket; allows on-the-spot payment confirmation for staff with `payment.verify`.
+   - Added recent verified payments feed to Revenue Insights.
+
+---
+
+## Technical Details & Pin-to-Pin Reference
+
+### 1. Station Setup for Any Camp (`20261121000016`)
+- **Database Helper `public.ensure_service(p_event, p_name, p_location)`:**
+  - Creates or retrieves an existing workflow service matching `p_name`.
+  - Normalizes any service containing "blood" or "sample" to the shared `SAMPLE` visit code, ensuring test catalogue mappings and diagnostic stations always align seamlessly.
+- **Station Deletion `public.delete_station(p_station, p_reason)`:**
+  - Safely deletes stations that have zero operational history (no registrations, orders, visits, queue, task or scan events).
+  - Cleans up associated capabilities, unused shifts, and status events with full audit logging.
+  - Stations that have processed participants are preserved for audit integrity (must be closed instead).
+- **UI & Validation:**
+  - `src/app/e/[eventId]/admin/stations/page.tsx`: Diagnostic stations and walk-in centres cannot be saved without selecting at least one visit capability. Unmapped stations are clearly flagged.
+  - `src/app/e/[eventId]/admin/catalog/page.tsx`: Test creation allows typing a new visit name that is created on the spot.
+
+### 2. Payment Model & Counter Flow (`20261121000017`)
+- **`settings.payment_model` Enforced at DB Level:**
+  - `patient_pays`: Custom camps default where patients pay for packages/tests.
+  - `sponsored`: Corporate/sponsor camps (e.g. Bank of India) where counter sales are prohibited and packages are ₹0 to the participant.
+  - Enforced in `register_participant()`: sponsored camps reject `p_test_ids` and ignore package prices.
+- **Event & Readiness Setup:**
+  - Unified **"Payments at this camp"** card: displays who pays, validated UPI ID + payee name, cash toggle, custom desk instructions, and an interactive **₹1 test QR code** to test scanning before camp day.
+- **Registration Desk & Tag Screen:**
+  - Clear banner indicating whether the camp is participant-paid or sponsored.
+  - When registration completes, the tag page immediately resolves the participant's first task and displays:
+    - Target station name and location room.
+    - Calling status / ahead count.
+    - On-the-spot **"Confirm payment now"** action if the operator holds cashier permissions (`payment.verify`).
+- **Revenue Insights:**
+  - Added **"Latest verified payments"** table displaying participant name, items, payment method, amount, and receipt number.
+
+
 

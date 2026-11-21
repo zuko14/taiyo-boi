@@ -24,8 +24,10 @@ export default async function RegisterPage({ params, searchParams }: { params: P
   const canOverride = ctx.can('registration.classification_override');
   const requireConsent = ctx.event.settings.require_consent !== false;
   const custom = ctx.event.settings.package_mode !== 'female_male';
+  const sponsored = !custom || ctx.event.settings.payment_model === 'sponsored';
+  const sellTests = custom && !sponsored;
   // pay-per-test camps: the event's priced, sellable tests (current price; server recomputes)
-  const [{ data: sellable }, { data: prices }, { data: pkgTests }] = custom ? await Promise.all([
+  const [{ data: sellable }, { data: prices }, { data: pkgTests }] = sellTests ? await Promise.all([
     ctx.supabase.from('test_catalog').select('id, display_name, category, location').eq('event_id', eventId).eq('active', true).eq('archived', false).eq('addon_available', true).order('category').order('display_name'),
     ctx.supabase.from('addon_prices').select('test_id, price_paise, tax_paise, location_scope, effective_from, effective_to').eq('event_id', eventId).eq('active', true).order('effective_from', { ascending: false }),
     ctx.supabase.from('package_tests').select('test_id, packages!inner(classification)').eq('event_id', eventId),
@@ -48,6 +50,10 @@ export default async function RegisterPage({ params, searchParams }: { params: P
   return (
     <>
       <PageHead title="Registration desk" meta={ctx.event.status !== 'live' ? <span className="badge amber">Event is {ctx.event.status}: registration is blocked until it is live</span> : 'Search first, then register once.'} />
+      <div className={`alert ${sponsored ? 'alert-info' : 'alert-warn'}`} role="note">
+        {sponsored ? <><strong>Sponsored camp</strong> — the organiser pays. Participants pay nothing here.</>
+          : <><strong>Patients pay at registration</strong> — pick their tests or package, then collect by UPI QR{(ctx.event.settings.payment_methods as string[] | undefined)?.includes('cash') ? ' or cash' : ''} on the next screen. Tests start only after the payment is confirmed.</>}
+      </div>
       <DutyPicker stations={stations} base={base} title="Counter" current={counter} />
       {counter ? (
         <div className="grid grid-2">
@@ -74,14 +80,14 @@ export default async function RegisterPage({ params, searchParams }: { params: P
             ) : <div className="alert alert-ok" style={{ marginTop: 16 }}>No existing registration found for these details.</div>) : null}
           </Card>
 
-          <Card title="2 · Register participant" sub={custom ? 'Choose a package, individual paid tests, or both.' : 'The package is selected automatically from the Female/Male classification.'}>
+          <Card title="2 · Register participant" sub={sellTests ? 'Choose a package, individual paid tests, or both.' : custom ? 'Choose the package.' : 'The package is selected automatically from the Female/Male classification.'}>
             <form action={registerParticipant}>
               <input type="hidden" name="event_id" value={eventId} /><input type="hidden" name="counter" value={counter} />
               <input type="hidden" name="idem" value={await idemKey()} />
               <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
                 <legend className="label" style={{ marginBottom: 8 }}>{custom ? 'Package' : 'Classification (required)'}</legend>
                 <div className="choice-cards">
-                  {custom && pickTests.length ? (
+                  {sellTests && pickTests.length ? (
                     <label className="choice-card">
                       <input type="radio" name="classification" value="" defaultChecked />
                       <span className="title">Tests only</span>
@@ -90,16 +96,16 @@ export default async function RegisterPage({ params, searchParams }: { params: P
                     </label>) : null}
                   {pkgChoices.map((p) => (
                     <label key={p.id} className="choice-card">
-                      <input type="radio" name="classification" value={p.classification} required={!custom || !pickTests.length} disabled={!p.active} />
+                      <input type="radio" name="classification" value={p.classification} required={!sellTests || !pickTests.length} disabled={!p.active} />
                       <span className="title">{classLabel(p.classification)}</span>
                       <span className="small text2">{p.name}</span>
-                      <span className="small muted">{p.price_paise ? `Participant pays ${inr(p.price_paise)}` : ctx.event.settings.package_mode === 'female_male' ? 'Sponsored · employee pays ₹0' : 'Free for the participant'}</span>
+                      <span className="small muted">{sponsored ? 'Sponsored · participant pays ₹0' : p.price_paise ? `Participant pays ${inr(p.price_paise)}` : 'Free for the participant'}</span>
                     </label>
                   ))}
                 </div>
               </fieldset>
-              {custom && pickTests.length ? <TestPicker tests={pickTests} packageTests={packageTests} /> : null}
-              {custom && !pickTests.length ? <p className="small muted">No priced tests yet — add them (or upload a CSV) in the Test catalogue to sell individual tests here.</p> : null}
+              {sellTests && pickTests.length ? <TestPicker tests={pickTests} packageTests={packageTests} /> : null}
+              {sellTests && !pickTests.length ? <p className="small muted">No priced tests yet — add them (or upload a CSV) in the Test catalogue to sell individual tests here.</p> : null}
               <div className="field"><label htmlFor="full_name">Full name</label><input id="full_name" name="full_name" required maxLength={120} defaultValue={sp.name} /></div>
               <div className="form-row">
                 <div className="field"><label htmlFor="age">Age</label><input id="age" name="age" type="number" min={0} max={120} /></div>

@@ -2,7 +2,7 @@ import { AdminForm, isLive } from '@/components/AdminForm';
 import { SubmitButton } from '@/components/SubmitButton';
 import { Card, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
-import { saveStation } from '../actions';
+import { deleteStation, saveStation } from '../actions';
 
 const KINDS: [string, string][] = [['registration_counter', 'Registration counters'], ['addon_desk', 'Add-on / payment desks'], ['station', 'Diagnostic stations'], ['walkin_centre', 'Walk-in centres']];
 type St = { id: string; code: string; name: string; kind: string; status: string; location: string; instructions: string; address: string; operating_hours: string;
@@ -43,10 +43,16 @@ export default async function Stations({ params }: { params: Promise<{ eventId: 
           </div>) : null}
         <div className="field"><label>Instructions shown to participants</label><input name="instructions" defaultValue={s?.instructions} /></div>
         {['station', 'walkin_centre'].includes(k) ? (
-          <div style={{ marginBottom: 10 }}><input type="hidden" name="caps_present" value="1" />
-            <div className="label">Services this {k === 'station' ? 'station' : 'centre'} can perform</div>
-            <div className="row">{(services ?? []).filter((x) => x.location === svcLoc).map((x) => (
-              <label key={x.id} className="check small"><input type="checkbox" name="caps" value={x.id} defaultChecked={(caps ?? []).some((c) => c.station_id === s?.id && c.service_id === x.id)} disabled={!ctx.can('station.mapping.edit')} />{x.name}</label>))}</div>
+          <div style={{ marginBottom: 10 }}>{ctx.can('station.mapping.edit') ? <input type="hidden" name="caps_present" value="1" /> : null}
+            <div className="label">What does this {k === 'station' ? 'station' : 'centre'} do? (required)</div>
+            {(services ?? []).some((x) => x.location === svcLoc) ? (
+              <div className="row">{(services ?? []).filter((x) => x.location === svcLoc).map((x) => (
+                <label key={x.id} className="check small"><input type="checkbox" name="caps" value={x.id} defaultChecked={(caps ?? []).some((c) => c.station_id === s?.id && c.service_id === x.id)} disabled={!ctx.can('station.mapping.edit')} />{x.name}</label>))}</div>
+            ) : <p className="small muted" style={{ margin: '4px 0' }}>No {k === 'station' ? 'event-day' : 'walk-in'} visits exist yet — type one below.</p>}
+            {ctx.can('station.mapping.edit') ? (
+              <div className="field" style={{ marginTop: 8 }}><label htmlFor={`ns-${s?.id ?? k}`}>{(services ?? []).some((x) => x.location === svcLoc) ? 'Or add a new visit type' : 'Visit type'}</label>
+                <input id={`ns-${s?.id ?? k}`} name="new_service" list={`visits-${k}`} maxLength={80} placeholder={k === 'station' ? 'e.g. Blood sample collection, X-Ray, ECG' : 'e.g. USG screening'} />
+                <span className="help">One station type per kind of visit: a <strong>blood sample collection</strong> station handles every blood test (CBC, HbA1c, lipid…); an <strong>X-Ray</strong> station handles X-Ray only. Add more stations of the same type to run them in parallel.</span></div>) : null}
           </div>) : null}
         <div className="row"><label className="check"><input type="checkbox" name="accepts_assignments" defaultChecked={s?.accepts_assignments ?? true} />Accepts new assignments</label><SubmitButton className="btn btn-solid btn-sm">{s ? 'Save' : 'Create'}</SubmitButton></div>
       </AdminForm>
@@ -55,7 +61,9 @@ export default async function Stations({ params }: { params: Promise<{ eventId: 
 
   return (
     <>
-      <PageHead title="Stations & counters" meta="Open/pause/close is done in Queue control. A station only receives work when open, staffed and on shift." />
+      <PageHead title="Stations & counters" meta="Each diagnostic station does one kind of visit (blood sample collection, X-Ray, ECG…). Tests are linked to visits in the Test catalogue. A station receives patients only when open and staffed on shift — open/pause/close in Queue control." />
+      <datalist id="visits-station"><option value="Blood sample collection" /><option value="X-Ray" /><option value="ECG" /><option value="BMD" /><option value="Body composition" /><option value="Eye check-up" /><option value="Dental check-up" /><option value="Doctor consultation" /></datalist>
+      <datalist id="visits-walkin_centre"><option value="USG screening" /><option value="Mammography" /></datalist>
       {KINDS.map(([kind, label]) => {
         const list = ((stations ?? []) as St[]).filter((s) => s.kind === kind);
         return (
@@ -63,8 +71,13 @@ export default async function Stations({ params }: { params: Promise<{ eventId: 
             <div className="table-wrap"><table><thead><tr><th>Code</th><th>Name</th><th>Status</th><th>Services</th><th></th></tr></thead>
               <tbody>{list.map((s) => (
                 <tr key={s.id}><td className="mono">{s.code}</td><td className="strong">{s.name}<div className="small muted">{s.location}</div></td><td><StatusBadge status={s.status} /></td>
-                  <td className="wrap small">{(caps ?? []).filter((c) => c.station_id === s.id).map((c) => (services ?? []).find((x) => x.id === c.service_id)?.name).join(', ') || '—'}</td>
-                  <td><details><summary className="btn btn-ghost btn-sm">Edit</summary><div style={{ width: 720, whiteSpace: 'normal', padding: '10px 0' }}>{form(s)}</div></details></td></tr>))}</tbody></table></div>
+                  <td className="wrap small">{(caps ?? []).filter((c) => c.station_id === s.id).map((c) => (services ?? []).find((x) => x.id === c.service_id)?.name).join(', ')
+                    || (['station', 'walkin_centre'].includes(s.kind) ? <span className="badge red">none — cannot receive participants</span> : '—')}</td>
+                  <td><details><summary className="btn btn-ghost btn-sm">Edit</summary><div style={{ width: 'min(720px, 86vw)', whiteSpace: 'normal', padding: '10px 0' }}>{form(s)}
+                    {ctx.can('station.configure') ? (
+                      <AdminForm action={deleteStation} eventId={eventId} back={back} live={live} hidden={{ id: s.id }} style={{ marginTop: 10 }}>
+                        <SubmitButton className="btn btn-red btn-sm" confirm={`Delete ${s.name}? Only possible if it never handled a participant; otherwise close it in Queue control.`}>Delete station</SubmitButton>
+                      </AdminForm>) : null}</div></details></td></tr>))}</tbody></table></div>
             {ctx.can('station.configure') ? <details style={{ marginTop: 12 }}><summary className="btn btn-ghost btn-sm">Add {label.toLowerCase().replace(/s$/, '')}</summary><div style={{ marginTop: 10 }}>{form(undefined, kind)}</div></details> : null}
           </Card>
         );

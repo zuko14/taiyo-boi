@@ -149,7 +149,7 @@ describe('custom event registration', () => {
     await must(a.rpc('set_event_status', { p_event: ev, p_status: 'live', p_reason: null }));
     const r = await must<{ registration_id: string; registration_code: string }>(fx.users.registration_staff.client.rpc('register_participant', {
       p_counter: reg.id, p_idempotency_key: randomUUID(), p_classification: 'basic', p_full_name: 'Synthetic Resident', p_consent: true }));
-    expect(r.registration_code).toMatch(/^BOI-B-\d{4}-000001$/);
+    expect(r.registration_code).toMatch(/^APT-B-\d{4}-000001$/);      // new camps use their own event code as prefix
     const tasks = await must<{ station_id: string | null }[]>(db().from('participant_tasks').select('station_id').eq('registration_id', r.registration_id));
     expect(tasks).toHaveLength(1);
     expect(tasks[0].station_id).toBe(st.id);

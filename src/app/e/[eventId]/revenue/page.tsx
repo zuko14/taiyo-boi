@@ -15,6 +15,7 @@ type Insights = {
   top_items: { kind: 'package' | 'addon'; name: string; count: number; amount_paise: number }[];
   by_cashier: { name: string; count: number; amount_paise: number }[];
   registrations: number;
+  recent: { at: string; amount_paise: number; method: string; code: string; name: string; kind: string; what: string; receipt: string | null; intent_id: string }[];
 };
 
 const METHOD: Record<string, string> = { cash: 'Cash', upi_manual: 'UPI (lab QR)' };
@@ -190,6 +191,17 @@ export default async function Revenue({ params }: { params: Promise<{ eventId: s
           {v.by_cashier.length ? <RankBars rows={v.by_cashier.map((c) => ({ label: c.name, amount: c.amount_paise, hint: `${c.count} payment${c.count === 1 ? '' : 's'} verified` }))} /> : <Empty>No verified payments yet.</Empty>}
         </Card>
       </div>
+      <Card title="Latest payments" sub="Who paid, for what, how — newest first">
+        {(v.recent ?? []).length ? (
+          <div className="table-wrap"><table><thead><tr><th>Time</th><th>Patient</th><th>Paid for</th><th>Method</th><th>Amount</th><th>Receipt</th></tr></thead>
+            <tbody>{v.recent.map((p) => (
+              <tr key={p.intent_id + p.at}><td className="small">{dt(p.at, tz, false)}</td>
+                <td><span className="strong">{p.name}</span><div className="mono small muted">{p.code}</div></td>
+                <td className="wrap small">{p.kind === 'package' ? `Package · ${p.what}` : p.what}</td>
+                <td className="small">{METHOD[p.method] ?? p.method}</td><td className="strong">{inr(p.amount_paise)}</td>
+                <td>{p.receipt ? <Link className="mono small" href={`/e/${eventId}/receipts/${p.intent_id}`}>{p.receipt}</Link> : '—'}</td></tr>))}</tbody></table></div>
+        ) : <Empty>No verified payments yet.</Empty>}
+      </Card>
       {ctx.event.settings.package_mode === 'female_male'
         ? <p className="small muted">Sponsored Female/Male package rates are not participant payments and are never shown here.</p> : null}
     </div>

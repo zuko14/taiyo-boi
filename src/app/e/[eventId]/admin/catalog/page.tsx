@@ -19,7 +19,7 @@ export default async function Catalog({ params }: { params: Promise<{ eventId: s
   const canPrice = ctx.can('addon.price.edit');
   const [{ data: tests }, { data: services }, { data: map }, { data: prices }] = await Promise.all([
     ctx.supabase.from('test_catalog').select('*').eq('event_id', eventId).order('archived').order('location').order('display_name'),
-    ctx.supabase.from('workflow_services').select('id, name, location').eq('event_id', eventId).order('name'),
+    ctx.supabase.from('workflow_services').select('id, code, name, location').eq('event_id', eventId).order('name'),
     ctx.supabase.from('workflow_service_tests').select('test_id, service_id, completion_rule').eq('event_id', eventId),
     ctx.supabase.from('addon_prices').select('test_id, price_paise, created_at').eq('event_id', eventId).eq('active', true).order('created_at', { ascending: false }),
   ]);
@@ -36,8 +36,9 @@ export default async function Catalog({ params }: { params: Promise<{ eventId: s
       </div>
       <div className="form-row">
         <div className="field"><label>Performed at</label><select name="location" defaultValue={t?.location ?? 'event_day'}><option value="event_day">Event day</option><option value="walk_in">Walk-in centre</option></select></div>
-        <div className="field"><label>Workflow service (physical visit)</label><select name="service_id" defaultValue={t ? svcOf(t.id)?.service_id ?? '' : ''}>
-          <option value="">— not mapped —</option>{(services ?? []).map((s) => <option key={s.id} value={s.id}>{s.name} ({locationLabel(s.location)})</option>)}</select></div>
+        <div className="field"><label>Done during which visit?</label><select name="service_id" defaultValue={t ? svcOf(t.id)?.service_id ?? '' : (services ?? []).find((s) => s.code === 'SAMPLE')?.id ?? ''}>
+          <option value="">— not linked (cannot be queued) —</option>{(services ?? []).map((s) => <option key={s.id} value={s.id}>{s.name} ({locationLabel(s.location)})</option>)}</select></div>
+        <div className="field"><label>…or a new visit</label><input name="new_service" list="visits-catalog" maxLength={80} placeholder="e.g. Blood sample collection, X-Ray" /></div>
         <div className="field"><label>Attendance on service completion</label><select name="completion_rule" defaultValue={t ? svcOf(t.id)?.completion_rule ?? 'fulfilled_on_complete' : 'fulfilled_on_complete'}>
           <option value="fulfilled_on_complete">Recorded when the service is completed</option><option value="manual_confirm">Confirm this test separately</option></select></div>
       </div>
@@ -57,6 +58,7 @@ export default async function Catalog({ params }: { params: Promise<{ eventId: s
 
   return (
     <>
+      <datalist id="visits-catalog"><option value="Blood sample collection" /><option value="X-Ray" /><option value="ECG" /><option value="BMD" /><option value="Body composition" /><option value="USG screening" /></datalist>
       <PageHead title="Test catalogue" meta={ctx.event.settings.package_mode === 'female_male'
         ? "Brochure shorthand (B2, BT2, D) is kept as supplied. Edit names/codes only from the Lab Partner's approved catalogue."
         : 'All tests offered at this camp. Add them to packages on the Packages page; an add-on price makes a test purchasable by participants.'} />
@@ -74,7 +76,7 @@ export default async function Catalog({ params }: { params: Promise<{ eventId: s
           <tbody>{((tests ?? []) as Test[]).map((t) => (
             <tr key={t.id}>
               <td className="mono">{t.code}</td><td className="strong">{t.display_name}</td><td className="small muted">{t.source_wording}</td>
-              <td>{locationLabel(t.location)}</td><td>{(services ?? []).find((s) => s.id === svcOf(t.id)?.service_id)?.name ?? <span className="badge red">unmapped</span>}</td>
+              <td>{locationLabel(t.location)}</td><td>{(services ?? []).find((s) => s.id === svcOf(t.id)?.service_id)?.name ?? <span className="badge red">no visit — cannot be queued</span>}</td>
               <td>{t.addon_available ? 'Yes' : '—'}</td><td>{priceOf(t.id) != null ? inr(priceOf(t.id)!) : '—'}</td><td><StatusBadge status={t.archived ? 'archived' : t.active ? 'active' : 'closed'} label={t.archived ? 'Archived' : t.active ? 'Active' : 'Inactive'} /></td>
               <td><details><summary className="btn btn-ghost btn-sm">Edit</summary><div style={{ width: 'min(760px, 86vw)', whiteSpace: 'normal', padding: '12px 0' }}>{form(t)}
                 {edit ? <AdminForm action={deleteTest} eventId={eventId} back={back} live={live} hidden={{ id: t.id }} style={{ marginTop: 10 }}>

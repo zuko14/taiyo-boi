@@ -6,7 +6,8 @@ import { Card, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
 import { isoToLocalInput } from '@/lib/format';
 import { labelSettings } from '@/lib/label';
-import { deleteEvent, resetEvent, saveEventProfile, saveEventSettings } from '../actions';
+import { deleteEvent, resetEvent, saveEventProfile, saveEventSettings, savePaymentSetup } from '../actions';
+import { UpiPay } from '@/components/UpiPay';
 
 const NEXT: Record<string, string[]> = { draft: ['ready', 'live'], ready: ['draft', 'live'], live: ['paused', 'closed'], paused: ['live', 'closed'], closed: ['live', 'archived'], archived: [] };
 
@@ -47,6 +48,42 @@ export default async function EventAdmin({ params }: { params: Promise<{ eventId
           </RpcForm>
         </Card>
       </div>
+
+      <Card title="Payments at this camp" sub="Decide who pays, then how money is received on the spot. Staff see this on every desk.">
+        <AdminForm action={savePaymentSetup} eventId={eventId} back={back} live={live}>
+          {e.settings.package_mode === 'female_male' ? (
+            <div className="alert alert-info">Sponsored event (Bank of India template): the company pays for the packages, employees pay nothing at registration. Only optional add-on tests at the add-on desk are paid by the employee.</div>
+          ) : (
+            <fieldset style={{ border: 0, padding: 0, margin: '0 0 12px' }}>
+              <legend className="label" style={{ marginBottom: 8 }}>Who pays for the tests?</legend>
+              <div className="choice-cards">
+                <label className="choice-card"><input type="radio" name="payment_model" value="patient_pays" defaultChecked={s.payment_model !== 'sponsored'} />
+                  <span className="title">Patients pay at registration</span>
+                  <span className="small text2">Apartments, societies, public camps: the desk picks tests or a package, the patient pays by UPI QR or cash, and tests start after payment is confirmed.</span></label>
+                <label className="choice-card"><input type="radio" name="payment_model" value="sponsored" defaultChecked={s.payment_model === 'sponsored'} />
+                  <span className="title">Sponsored — organiser pays</span>
+                  <span className="small text2">Company / corporate camps: patients pay nothing at registration; packages are free for them.</span></label>
+              </div>
+            </fieldset>)}
+          <div className="label">Receive payments by UPI QR</div>
+          <div className="form-row">
+            <div className="field"><label htmlFor="upi_vpa">UPI ID of the receiving bank account</label><input id="upi_vpa" name="upi_vpa" defaultValue={String(s.upi_vpa ?? '')} placeholder="taiyolabs@okicici" autoComplete="off" inputMode="email" />
+              <span className="help">Find it in the bank&apos;s or business UPI app (PhonePe Business, GPay for Business, Paytm, BHIM), or printed under the lab&apos;s QR. Money paid through the QR goes straight to the bank account behind this UPI ID.</span></div>
+            <div className="field"><label htmlFor="upi_payee_name">Account holder name</label><input id="upi_payee_name" name="upi_payee_name" defaultValue={String(s.upi_payee_name ?? '')} placeholder="Taiyo Labs Pvt Ltd" />
+              <span className="help">Exactly as the bank shows it — the patient&apos;s UPI app displays it before they pay.</span></div>
+          </div>
+          <label className="check"><input type="checkbox" name="accept_cash" defaultChecked={methods.includes('cash')} />Also accept cash at the desk</label>
+          <div className="field" style={{ marginTop: 8 }}><label htmlFor="pi">Payment note shown at the desk (optional)</label><input id="pi" name="payment_instructions" defaultValue={String(s.payment_instructions ?? '')} placeholder="e.g. Pay by scanning the QR; show the success screen to the desk" /></div>
+          <input type="hidden" name="payment_methods_extra" value={methods.filter((m) => !['cash', 'upi_manual'].includes(m)).join(', ')} />
+          <SubmitButton>Save payment setup</SubmitButton>
+        </AdminForm>
+        {s.upi_vpa ? (
+          <div style={{ marginTop: 16 }}>
+            <div className="label">Check it before the camp: scan this ₹1 test QR with your own phone</div>
+            <p className="small text2" style={{ margin: '4px 0 0' }}>Your UPI app must show <strong>{String(s.upi_payee_name || s.upi_vpa)}</strong> and ₹1.00. If the name is wrong, fix the UPI ID before patients pay. Every patient QR is made the same way, with their exact amount and registration code.</p>
+            <UpiPay settings={s} amountPaise={100} reference="TEST-SCAN" />
+          </div>) : null}
+      </Card>
 
       <Card title="Event profile">
         <AdminForm action={saveEventProfile} eventId={eventId} back={back} live={live}>
@@ -89,17 +126,7 @@ export default async function EventAdmin({ params }: { params: Promise<{ eventId
               <div className="field" style={{ marginTop: 10 }}><label>Default service minutes (queue estimate)</label><input type="number" name="default_service_minutes" min={1} defaultValue={String(s.default_service_minutes ?? 5)} /></div>
             </div>
             <div>
-              <div className="label">Approved payment methods (only confirmed, tested methods)</div>
-              <label className="check"><input type="checkbox" name="payment_methods" value="cash" defaultChecked={methods.includes('cash')} />Cash (cashier count)</label>
-              <label className="check"><input type="checkbox" name="payment_methods" value="upi_manual" defaultChecked={methods.includes('upi_manual')} />UPI — manual check of settlement/UTR</label>
-              <div className="field"><label>Other method codes (comma-separated)</label><input name="payment_methods_extra" defaultValue={methods.filter((m) => !['cash', 'upi_manual'].includes(m)).join(', ')} /></div>
-              <div className="field"><label>Payment instructions shown at the add-on desk</label><textarea name="payment_instructions" rows={2} defaultValue={String(s.payment_instructions ?? '')} /></div>
-              <div className="label" style={{ marginTop: 6 }}>Lab&apos;s UPI collection (optional)</div>
-              <div className="form-row">
-                <div className="field"><label htmlFor="upi_vpa">UPI ID (VPA) printed with the lab&apos;s QR</label><input id="upi_vpa" name="upi_vpa" defaultValue={String(s.upi_vpa ?? '')} placeholder="labname@okicici" autoComplete="off" /></div>
-                <div className="field"><label htmlFor="upi_payee_name">Payee name</label><input id="upi_payee_name" name="upi_payee_name" defaultValue={String(s.upi_payee_name ?? '')} placeholder="Lab legal name" /></div>
-              </div>
-              <span className="help">Desks, the cashier screen and the participant&apos;s phone then show a UPI QR with the exact amount and the registration code. Enable &ldquo;UPI — manual check&rdquo; above so the cashier can confirm payments by UTR.</span>
+              <p className="small muted">Who pays, UPI and cash are set in <strong>Payments at this camp</strong> above.</p>
             </div>
           </div>
           <div className="label" style={{ marginTop: 6 }}>Tag label</div>

@@ -113,7 +113,8 @@ describe('tags and portal tokens', () => {
     expect(await must(db().rpc('portal_view', { p_token_hash: sha256(t1) }))).toBeNull();
     const view = await must<{ registration: { code: string }; tasks: unknown[] }>(db().rpc('portal_view', { p_token_hash: sha256(t2) }));
     expect(view.registration.code).toBe(r.registration_code);
-    expect(JSON.stringify(view)).not.toMatch(/2999|1999|amount_paise":(299900|199900)/);
+    // ids are random hex and can contain "1999" by chance: strip them before looking for the sponsor rates
+    expect(JSON.stringify(view).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '')).not.toMatch(/2999|1999|amount_paise":(299900|199900)/);
     await must(fx.users.registration_supervisor.client.rpc('revoke_tag', { p_reg: r.registration_id, p_reason: 'lost' }));
     expect(await must(db().rpc('portal_view', { p_token_hash: sha256(t2) }))).toBeNull();
     const prints = await must<unknown[]>(db().from('tag_prints').select('id').eq('registration_id', r.registration_id));

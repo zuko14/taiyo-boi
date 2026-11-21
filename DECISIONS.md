@@ -86,6 +86,20 @@ Dated 10 Nov 2026 unless noted. “Provisional” means configurable and awaitin
 - The scheduler only assigns to stations that are **open, accepting, and have staff on shift now** (CLAUDE.md §5.4). Live events could reach a state where no station qualified: new stations start closed, Reset closes stations and clears shifts, shifts expire. Going live only warned.
 - Now: (1) a never-opened station opens automatically when its first shift is assigned (supervisor-closed/paused stations never reopen by themselves); (2) going Live is refused while no diagnostic station is open with staff on shift; (3) Queue control shows per-service coverage with the exact missing piece and one-click Open / Assign shift; (4) `/api/health` reports `schema: outdated` if the app runs without its migrations.
 
+## 2026-11-21 — station setup for any camp
+
+- A diagnostic station does one kind of **visit** (workflow service). Creating/editing a station or a test can create a visit on the spot (`ensure_service`); any "blood"/"sample" name maps to the shared `SAMPLE` visit (also the CSV import default), so blood tests and blood stations always meet. More stations of the same visit run in parallel.
+- A diagnostic station / walk-in centre cannot be saved without at least one visit (validated before anything is written). Unmapped stations and tests are flagged in red.
+- `delete_station`: only for stations that never handled a participant (no registrations, orders, visits, queue, task or scan history); otherwise close it so evidence is kept. Its unused shifts and status events go with it, audited.
+
+## 2026-11-21 — who pays, on-the-spot collection, first station at the desk
+
+- `settings.payment_model` per camp: **patient_pays** (default for custom camps) or **sponsored**. Enforced in `register_participant`: a sponsored camp sells no tests at the counter and ignores package prices. Bank of India template events are always sponsored. The registration desk shows a banner stating which applies.
+- "Payments at this camp" card on Event & readiness: who pays, UPI ID + account-holder name (validated), cash on/off, desk note, and a ₹1 test QR to scan before the camp. UPI is a verifiable method only when a UPI ID is set. A static UPI QR never confirms payment by itself; the desk/cashier confirms with the UTR (or cash).
+- Registration result page: "Send the participant to" (live first station, ticket, called/ahead) and, for staff with `payment.verify`, confirm the payment in place → receipt; the first station appears immediately. Single-desk camps give the registration desk the Cashier role and turn off the two-person payment check.
+- Revenue insights list the latest payments (patient, what was paid for, method, amount, receipt).
+- New camps no longer inherit Bank of India labels: sponsor defaults to empty and the registration prefix comes from the event code; the BOI template sets both.
+
 ## Open approvals (CLAUDE.md §20 highest priority)
 
 1. Lab Partner approval of catalogue, order codes, and test→visit grouping.
