@@ -27,7 +27,7 @@ export default async function Catalog({ params, searchParams }: { params: Promis
   const canPrice = ctx.can('addon.price.edit');
   const [{ data: tests }, { data: services }, { data: map }, { data: prices }] = await Promise.all([
     ctx.supabase.from('test_catalog').select('*').eq('event_id', eventId).order('archived').order('location').order('display_name'),
-    ctx.supabase.from('workflow_services').select('id, code, name, location').eq('event_id', eventId).order('name'),
+    ctx.supabase.from('workflow_services').select('id, code, name, location, active').eq('event_id', eventId).order('name'),
     ctx.supabase.from('workflow_service_tests').select('test_id, service_id, completion_rule').eq('event_id', eventId),
     ctx.supabase.from('addon_prices').select('test_id, price_paise, created_at').eq('event_id', eventId).eq('active', true).order('created_at', { ascending: false }),
   ]);
@@ -56,7 +56,7 @@ export default async function Catalog({ params, searchParams }: { params: Promis
       <div className="form-row">
         <div className="field"><label>Performed at</label><select name="location" defaultValue={t?.location ?? 'event_day'}><option value="event_day">Event day</option><option value="walk_in">Walk-in centre</option></select></div>
         <div className="field"><label>Done during which visit?</label><select name="service_id" defaultValue={t ? svcOf(t.id)?.service_id ?? '' : (services ?? []).find((s) => s.code === 'SAMPLE')?.id ?? ''}>
-          <option value="">— not linked (cannot be queued) —</option>{(services ?? []).map((s) => <option key={s.id} value={s.id}>{s.name} ({locationLabel(s.location)})</option>)}</select></div>
+          <option value="">— not linked (cannot be queued) —</option>{(services ?? []).filter((s) => s.active || (t && svcOf(t.id)?.service_id === s.id)).map((s) => <option key={s.id} value={s.id}>{s.name} ({locationLabel(s.location)})</option>)}</select></div>
         <div className="field"><label>…or a new visit</label><input name="new_service" list="visits-catalog" maxLength={80} placeholder="e.g. Blood sample collection, X-Ray" /></div>
         <div className="field"><label>Attendance on service completion</label><select name="completion_rule" defaultValue={t ? svcOf(t.id)?.completion_rule ?? 'fulfilled_on_complete' : 'fulfilled_on_complete'}>
           <option value="fulfilled_on_complete">Recorded when the service is completed</option><option value="manual_confirm">Confirm this test separately</option></select></div>

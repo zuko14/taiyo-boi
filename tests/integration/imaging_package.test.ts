@@ -14,9 +14,9 @@ beforeAll(async () => {
   const visit = (name: string) => must<string>(a.rpc('ensure_service', { p_event: ev, p_name: name, p_location: 'event_day' }));
   const v = { blood: await visit('Blood sample collection'), ecg: await visit('ECG'), usg: await visit('Ultrasound (USG)'), echo: await visit('2D Echo'), xray: await visit('X-Ray') };
   const codes = await must<{ code: string }[]>(db().from('workflow_services').select('code').eq('event_id', ev).order('code'));
-  expect(codes.map((c) => c.code)).toEqual(['2D-ECHO', 'ECG', 'SAMPLE', 'ULTRASOUND-USG', 'X-RAY']);
+  expect(codes.map((c) => c.code)).toEqual(['2D-ECHO', 'ECG', 'SAMPLE', 'USG', 'X-RAY']);
   await must(a.rpc('import_catalog', { p_event: ev, p_rows: [
-    ['FBS', 'SAMPLE'], ['CBC', 'SAMPLE'], ['LIPID', 'SAMPLE'], ['ECG', 'ECG'], ['USG', 'ULTRASOUND-USG'], ['ECHO-2D', '2D-ECHO'], ['XRAY-CHEST', 'X-RAY'],
+    ['FBS', 'SAMPLE'], ['CBC', 'SAMPLE'], ['LIPID', 'SAMPLE'], ['ECG', 'ECG'], ['USG', 'USG'], ['ECHO-2D', '2D-ECHO'], ['XRAY-CHEST', 'X-RAY'],
   ].map(([code, svc]) => ({ code, name: code, category: '', price_paise: 10000, location: 'event_day', service_code: svc, lab_order_code: '', instructions: '' })) }));
   const pkg = (await must<{ id: string }>(db().from('packages').insert({ event_id: ev, classification: 'aarush', code: 'AARUSH', name: 'Aarush Executive Plus', code_letter: 'A', price_paise: 449900 }).select('id').single())).id;
   const tests = await must<{ id: string }[]>(db().from('test_catalog').select('id').eq('event_id', ev));

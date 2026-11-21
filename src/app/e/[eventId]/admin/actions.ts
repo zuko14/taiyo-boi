@@ -245,8 +245,8 @@ export async function saveStation(fd: FormData) {
   if (fd.has('caps_present')) {
     // typed visits, comma-separated ("Ultrasound (USG), 2D Echo" = one room doing both); created or reused
     const fresh = str(fd, 'new_service').split(',').map((v) => v.trim()).filter(Boolean);
-    // nothing ticked or typed: the station's own name is its visit (e.g. "Ultrasound USG")
-    if (!want.size && !fresh.length) {
+    // nothing ticked, typed or picked: the station's own name is its visit (e.g. "Ultrasound USG")
+    if (!want.size && !fresh.length && !fd.getAll('test_ids').length) {
       if (!str(fd, 'name')) go(back, 'err', 'Give the station a name, or choose what it does.');
       fresh.push(str(fd, 'name'));
     }
@@ -264,6 +264,13 @@ export async function saveStation(fd: FormData) {
     : await db.from('stations').insert({ ...row, event_id: eventId, code: str(fd, 'code').toUpperCase(), kind }).select('id').single();
   if (res.error) go(back, 'err', friendlyError(res.error));
   if (fd.has('caps_present')) {
+    // tests picked for this station (custom combined rooms): link them, and the station does their visits
+    const picked = [...new Set(fd.getAll('test_ids').map(String).filter(Boolean))];
+    if (picked.length) {
+      const { data: ids, error } = await db.rpc('station_link_tests', { p_station: res.data!.id, p_test_ids: picked, p_one_stop: bool(fd, 'one_stop') });
+      if (error) go(back, 'err', friendlyError(error));
+      for (const id of (ids as string[] | null) ?? []) want.add(id);
+    }
     const { data: cur } = await db.from('station_capabilities').select('service_id').eq('station_id', res.data!.id);
     const have = new Set((cur ?? []).map((c) => c.service_id));
     for (const s of have) if (!want.has(s)) { const { error } = await db.from('station_capabilities').delete().eq('station_id', res.data!.id).eq('service_id', s); if (error) go(back, 'err', friendlyError(error)); }
@@ -437,4 +444,11 @@ export async function importPackages(fd: FormData) {
   if (error) go(back, 'err', friendlyError(error));
   const d = data as { created: number; updated: number; tests: number };
   done(null, `Packages imported: ${d.created} new, ${d.updated} updated, ${d.tests} test line(s).`);
+}
+
+export async function mergeVisit(fd: FormData) {
+  const { db, done } = await admin(fd, 'Visits merged');
+  const { data, error } = await db.rpc('merge_service', { p_from: str(fd, 'from'), p_into: str(fd, 'into'), p_reason: strOrNull(fd, 'reason') });
+  const d = data as { tests: number; stations_added: number } | null;
+  done(error, `Merged: ${d?.tests ?? 0} test(s) moved, ${d?.stations_added ?? 0} station link(s) added.`);
 }

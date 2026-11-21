@@ -33,7 +33,7 @@ export default async function EventAdmin({ params }: { params: Promise<{ eventId
       <div className="grid grid-2">
         <Card title="Readiness checks" sub="Errors block Ready/Live. Warnings must be resolved with the Lab Partner before production.">
           {(checks ?? []).length ? <ul className="list">{(checks ?? []).map((c: { level: string; message: string }, i: number) => (
-            <li key={i}><span className="small">{c.message}</span><span className={`badge ${c.level === 'error' ? 'red' : 'amber'}`}>{c.level}</span></li>))}</ul>
+            <li key={i}><span className="small">{c.message}{/has no compatible (diagnostic station|walk-in centre)/.test(c.message) ? <> — <Link href={`/e/${eventId}/admin/stations`}>fix in Stations &amp; counters → Visits</Link></> : null}</span><span className={`badge ${c.level === 'error' ? 'red' : 'amber'}`}>{c.level}</span></li>))}</ul>
             : <div className="alert alert-ok">No issues found.</div>}
         </Card>
         <Card title="Event status">

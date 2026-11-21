@@ -2,7 +2,8 @@ import { AdminForm, isLive } from '@/components/AdminForm';
 import { SubmitButton } from '@/components/SubmitButton';
 import { Card, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
-import { deleteStation, saveStation } from '../actions';
+import { deleteStation, mergeVisit, saveStation } from '../actions';
+import { PackageTestPicker } from '@/components/PackageTestPicker';
 import { RpcForm } from '@/components/RpcForm';
 import { nowMs } from '@/lib/clock';
 import { isoToLocalInput } from '@/lib/format';
@@ -19,11 +20,18 @@ export default async function Stations({ params }: { params: Promise<{ eventId: 
   const canShift = ctx.can('shift.assign');
   const [{ data: stations }, { data: services }, { data: caps }, { data: people }, { data: shifts }] = await Promise.all([
     ctx.supabase.from('stations').select('*').eq('event_id', eventId).order('code'),
-    ctx.supabase.from('workflow_services').select('id, name, location').eq('event_id', eventId).eq('active', true).order('name'),
+    ctx.supabase.from('workflow_services').select('id, code, name, location').eq('event_id', eventId).eq('active', true).order('name'),
     ctx.supabase.from('station_capabilities').select('station_id, service_id').eq('event_id', eventId),
     canShift ? ctx.supabase.rpc('staff_directory', { p_event: eventId }) : Promise.resolve({ data: [] }),
     ctx.supabase.from('staff_assignments').select('station_id, user_id, shift_start, shift_end').eq('event_id', eventId).eq('status', 'active'),
   ]);
+  const [{ data: catalog }, { data: links }] = await Promise.all([
+    ctx.supabase.from('test_catalog').select('id, display_name, category, location').eq('event_id', eventId).eq('active', true).eq('archived', false).order('category').order('display_name'),
+    ctx.supabase.from('workflow_service_tests').select('test_id, service_id').eq('event_id', eventId),
+  ]);
+  const visitOf = (testId: string) => (services ?? []).find((v) => v.id === (links ?? []).find((l) => l.test_id === testId)?.service_id)?.name ?? null;
+  const testsFor = (loc: string) => (catalog ?? []).filter((t) => t.location === loc)
+    .map((t) => ({ id: t.id, name: t.display_name, category: t.category, price_paise: null, visit: visitOf(t.id), walkIn: t.location === 'walk_in' }));
   const now = nowMs(); const tz = ctx.event.timezone;
   const ppl = (people ?? []) as { user_id: string; full_name: string }[];
   const onShift = (stationId: string) => [...new Set((shifts ?? []).filter((a) => a.station_id === stationId
@@ -67,6 +75,15 @@ export default async function Stations({ params }: { params: Promise<{ eventId: 
                 <input id={`ns-${s?.id ?? k}`} name="new_service" list={`visits-${k}`} maxLength={80} placeholder={k === 'station' ? 'e.g. Ultrasound (USG), 2D Echo — comma-separate to do several here' : 'e.g. USG screening'} />
                 <span className="help">One station type per kind of visit: a <strong>blood sample collection</strong> station handles every blood test (CBC, HbA1c, lipid…); an <strong>X-Ray</strong> station handles X-Ray only. One room can do several visits (tick them, or type &ldquo;Ultrasound (USG), 2D Echo&rdquo;). Left empty, the station name becomes its visit. Add more stations of the same type to run them in parallel.</span></div>) : null}
           </div>) : null}
+        {['station', 'walkin_centre'].includes(k) && ctx.can('station.mapping.edit') ? (
+          <details style={{ marginBottom: 10 }}>
+            <summary className="btn btn-ghost btn-sm">Or pick the exact tests done here (custom combined room)</summary>
+            <div style={{ marginTop: 10 }}>
+              <p className="small text2" style={{ marginTop: 0 }}>Ticked tests are done at this {k === 'station' ? 'station' : 'centre'}. Tests that already belong to a visit keep it (one queue stop per visit); tests without a visit get one named after this {k === 'station' ? 'station' : 'centre'}.</p>
+              <PackageTestPicker tests={testsFor(svcLoc)} initial={[]} noun="picked for this room" allowUnlinked />
+              <label className="check small" style={{ marginTop: 8 }}><input type="checkbox" name="one_stop" /><span>Do all ticked tests in <strong>one queue stop</strong> here (e.g. ECG + 2D Echo together). They move to this room&apos;s own visit; patients registered earlier keep theirs.</span></label>
+            </div>
+          </details>) : null}
         <div className="row"><label className="check"><input type="checkbox" name="accepts_assignments" defaultChecked={s?.accepts_assignments ?? true} />Accepts new assignments</label><SubmitButton className="btn btn-solid btn-sm">{s ? 'Save' : 'Create'}</SubmitButton></div>
       </AdminForm>
     );
@@ -105,6 +122,29 @@ export default async function Stations({ params }: { params: Promise<{ eventId: 
           </Card>
         );
       })}
+
+      <Card title="Visits (queue stops)" sub="A visit is one queue stop; tests belong to a visit, stations do visits. A visit with tests but no station blocks the event — add it to a station, or merge it into the visit a station already does (e.g. “usg” into “Ultrasound (USG)”).">
+        <div className="table-wrap"><table><thead><tr><th>Visit</th><th>Tests</th><th>Done at</th><th></th></tr></thead>
+          <tbody>{(services ?? []).map((v) => {
+            const tests = (links ?? []).filter((l) => l.service_id === v.id).map((l) => (catalog ?? []).find((t) => t.id === l.test_id)?.display_name).filter(Boolean);
+            const at = (caps ?? []).filter((c) => c.service_id === v.id).map((c) => ((stations ?? []) as St[]).find((x) => x.id === c.station_id)?.name).filter(Boolean);
+            const others = (services ?? []).filter((o) => o.id !== v.id && o.location === v.location);
+            return (
+              <tr key={v.id}>
+                <td><span className="strong">{v.name}</span><div className="mono small muted">{v.code}{v.location === 'walk_in' ? ' · walk-in' : ''}</div></td>
+                <td className="wrap small">{tests.length ? `${tests.length} · ${tests.slice(0, 6).join(', ')}${tests.length > 6 ? '…' : ''}` : <span className="muted">none</span>}</td>
+                <td className="small">{at.length ? at.join(', ') : tests.length ? <span className="badge red">no station — blocks the event</span> : <span className="muted">—</span>}</td>
+                <td>{ctx.can('station.mapping.edit') && others.length ? (
+                  <details><summary className="btn btn-ghost btn-sm">Merge…</summary>
+                    <AdminForm action={mergeVisit} eventId={eventId} back={back} live={live} hidden={{ from: v.id }} style={{ marginTop: 8, minWidth: 240 }}>
+                      <div className="field"><label htmlFor={`mv-${v.id}`}>Merge “{v.name}” into</label>
+                        <select id={`mv-${v.id}`} name="into" required>{others.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>
+                        <span className="help">Its tests move over and every station doing it also does the target. Patients already registered are unaffected.</span></div>
+                      <SubmitButton className="btn btn-solid btn-sm" confirm={`Merge “${v.name}” into the selected visit? This cannot be split again automatically.`}>Merge</SubmitButton>
+                    </AdminForm></details>) : null}</td>
+              </tr>); })}
+            {!(services ?? []).length ? <tr><td colSpan={4} className="muted">No visits yet — they are created with stations or tests.</td></tr> : null}</tbody></table></div>
+      </Card>
     </>
   );
 }

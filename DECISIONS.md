@@ -131,6 +131,13 @@ Dated 10 Nov 2026 unless noted. “Provisional” means configurable and awaitin
 - Anyone with an account on the event (even a removed role) can be given a shift.
 - Stations page: "On shift now" per station and an "Add staff" quick assign; the Staff & shifts picker groups stations by type.
 
+## 2026-11-22 — one name per visit, merge, custom rooms
+
+- Root cause of "Event-day service usg has no compatible diagnostic station": the test had its own visit "usg" while the station did "Ultrasound (USG)" — two visits for one thing.
+- `ensure_service` now maps common names to one visit: ultrasound/USG/sonography → USG; 2D echo/echocardiography → 2D-ECHO; x-ray/xray → X-RAY; ECG/EKG → ECG (blood/sample → SAMPLE as before).
+- `merge_service` folds a duplicate visit into another: tests move, the target gains the duplicate's stations, the duplicate is deactivated (kept so already-registered patients can still be served). Stations page → Visits lists each visit's tests and stations, flags visits that block the event, and offers Merge.
+- `station_link_tests`: a station can pick its exact tests (custom combined room). Tests keep their own visit (separate stops) unless "one queue stop" is chosen, which moves them to the room's own visit `ROOM-<station code>`; tests with no visit always go there. Location mismatches (walk-in vs event day) are refused.
+
 ## Open approvals (CLAUDE.md §20 highest priority)
 
 1. Lab Partner approval of catalogue, order codes, and test→visit grouping.

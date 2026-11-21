@@ -499,6 +499,14 @@ This session implemented **three major operational enhancements**:
      - Walk-in Centre → Walk-in Staff
    - Added live "On shift now" indicators and quick "Add staff" shortcuts directly on the Stations management screen.
 
+4. **Canonical Visit Normalization, Visit Merge & Custom Room Mappings (`20261122000022_visit_merge_custom_station.sql`)** —
+   - **Root Cause Addressed:** Resolved "Event-day service [name] has no compatible diagnostic station" caused by subtle naming differences (e.g. test mapped to "usg" while station mapped to "Ultrasound (USG)").
+   - **Canonical Normalization (`ensure_service`):** Auto-normalizes ultrasound/USG/sonography → `USG`, 2D Echo/echocardiography → `2D-ECHO`, X-Ray/xray → `X-RAY`, ECG/EKG → `ECG`, and blood/sample → `SAMPLE`.
+   - **Visit Merge (`merge_service`):** Allows folding duplicate visits into one; reassigns all tests, transfers station capabilities, and safely deactivates the duplicate visit.
+   - **Custom Combined Rooms (`station_link_tests`):** Allows a station to pick its exact test list, with options for separate queue stops or a unified single queue stop (`ROOM-<station code>`).
+   - **Stations → Visits UI:** Lists tests and stations per visit, flags unserved visits blocking go-live, and provides one-click Merge.
+
+
 
 
 
