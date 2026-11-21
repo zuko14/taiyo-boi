@@ -11,12 +11,13 @@ import { env } from '@/lib/env';
 import { dt } from '@/lib/format';
 import { ScanMatches } from '@/components/ScanMatches';
 import { resolveScan, searchRegistrations } from '@/lib/scan';
+import { scanStart } from './actions';
 
 type QA = { id: string; seq: number; state: string; task_id: string; registration_id: string; assigned_at: string; called_at: string | null; started_at: string | null;
   participant_tasks: { service_id: string; service_name: string; source: string; task_items: { order_items: { id: string; test_name: string; completion_rule: string; status: string } }[] };
   registrations: { registration_code: string; participants: { full_name: string; age: number | null } } };
 
-export default async function StationPage({ params, searchParams }: { params: Promise<{ eventId: string }>; searchParams: Promise<{ at?: string; scan?: string; reg?: string }> }) {
+export default async function StationPage({ params, searchParams }: { params: Promise<{ eventId: string }>; searchParams: Promise<{ at?: string; scan?: string; reg?: string; find?: string }> }) {
   const { eventId } = await params;
   const sp = await searchParams;
   const ctx = await requirePerm(eventId, 'task.perform');
@@ -28,23 +29,28 @@ export default async function StationPage({ params, searchParams }: { params: Pr
   const station = stations.find((s) => s.id === at);
 
   let content = null;
+  let onDutyName: string | undefined;
   if (station) {
-    const [{ data: queue }, { count: done }, { data: caps }] = await Promise.all([
+    const [{ data: queue }, { count: done }, { data: caps }, { data: duty }] = await Promise.all([
       ctx.supabase.from('queue_assignments')
         .select('id, seq, state, task_id, registration_id, assigned_at, called_at, started_at, participant_tasks(service_id, service_name, source, task_items(order_items(id, test_name, completion_rule, status))), registrations(registration_code, participants(full_name, age))')
         .eq('station_id', station.id).in('state', ['queued', 'called', 'in_service']).order('seq'),
       ctx.supabase.from('queue_assignments').select('id', { count: 'exact', head: true }).eq('station_id', station.id).eq('state', 'completed'),
       ctx.supabase.from('station_capabilities').select('service_id, workflow_services(name)').eq('station_id', station.id),
+      ctx.supabase.rpc('station_on_duty', { p_event: eventId }),
     ]);
+    const onDuty = ((duty ?? []) as { station_id: string; staff: string }[]).find((d) => d.station_id === station.id)?.staff;
+    onDutyName = onDuty;
     const rows = (queue ?? []) as unknown as QA[];
     const serving = rows.filter((q) => q.state === 'in_service');
     const called = rows.filter((q) => q.state === 'called');
     const waiting = rows.filter((q) => q.state === 'queued');
 
     // scanning only finds the participant's task here; it never changes its state
-    const scannedReg = sp.reg ?? (await resolveScan(ctx, sp.scan, station.id));
+    const scannedReg = (sp.reg && /^[0-9a-f-]{36}$/.test(sp.reg) ? sp.reg : null) ?? (await resolveScan(ctx, sp.scan, station.id));
     const scannedRow = scannedReg ? rows.find((q) => q.registration_id === scannedReg) : null;
-    const matches = sp.scan && !scannedReg ? await searchRegistrations(ctx, sp.scan) : [];
+    const query = sp.find ?? sp.scan;
+    const matches = query && !scannedReg ? await searchRegistrations(ctx, query) : [];
     const capIds = new Set((caps ?? []).map((c) => c.service_id as string));
     // scanned participant waiting at another station that offers the same service: can be served here
     const { data: elsewhere } = scannedReg && !scannedRow ? await ctx.supabase.from('queue_assignments')
@@ -98,9 +104,9 @@ export default async function StationPage({ params, searchParams }: { params: Pr
         {station.status !== 'open' ? <div className="alert alert-warn">This station is {station.status}. It receives no new participants.</div> : null}
         <Card>
           <div className="row-between">
-            <div style={{ flex: 1, minWidth: 260 }}><ScanBox action={base} hidden={{ at: station.id }} label="Scan participant tag to find their task here" /></div>
+            <div style={{ flex: 1, minWidth: 260 }}><ScanBox action={scanStart} hidden={{ event_id: eventId, station: station.id }} label="Scan the patient's tag (or type code / name) — their test starts" /></div>
           </div>
-          <p className="small muted" style={{ margin: '10px 0 0' }}>The queue runs itself: participants are sent to the least-busy station and called here automatically as soon as you are free. Press <strong>Start</strong> when they arrive and <strong>Complete</strong> when done; use <strong>No-show</strong> if a called participant does not come.</p>
+          <p className="small muted" style={{ margin: '10px 0 0' }}>The queue runs itself: patients are assigned at registration and sent to the least-busy station; the next one is called here automatically as soon as you are free. When a patient arrives, <strong>scan their tag</strong> (or tap <strong>Start</strong> on their row) — the test starts. Press <strong>Complete</strong> when done and they are sent to their next station automatically. Use <strong>No-show</strong> if a called patient does not come.</p>
           {scannedReg ? (scannedRow ? <div className="alert alert-ok" style={{ marginTop: 12 }}>Found: {scannedRow.registrations.registration_code} — {scannedRow.participant_tasks.service_name} ({scannedRow.state}).</div>
             : other && other.state !== 'in_service' && capIds.has(other.participant_tasks.service_id) ? (
               <div className="alert alert-warn row-between" style={{ marginTop: 12 }}>
@@ -108,7 +114,9 @@ export default async function StationPage({ params, searchParams }: { params: Pr
                 <RpcForm eventId={eventId} rpc="claim_task" back={back} ok="Moved to this station" hidden={{ p_task: other.task_id, p_station: station.id }}><SubmitButton className="btn btn-solid btn-sm">Serve here instead</SubmitButton></RpcForm>
               </div>)
             : <div className="alert alert-err" style={{ marginTop: 12 }}>{other ? `This participant’s current step is ${other.participant_tasks.service_name} at ${other.stations.name} (${other.state.replace('_', ' ')}).` : 'This participant has no task assigned to this station.'} <Link href={`/e/${eventId}/participants/${scannedReg}`}>See their progress</Link></div>)
-            : sp.scan ? <div style={{ marginTop: 12 }}><ScanMatches query={sp.scan} matches={matches} hrefFor={(id) => `${base}?at=${station.id}&reg=${id}`} /></div> : null}
+            : query ? <div style={{ marginTop: 12 }}><ScanMatches query={query} matches={matches} hrefFor={(id) => `${base}?at=${station.id}&reg=${id}`}
+                pick={(m) => (<form action={scanStart}><input type="hidden" name="event_id" value={eventId} /><input type="hidden" name="station" value={station.id} /><input type="hidden" name="reg" value={m.id} />
+                  <SubmitButton className="btn btn-solid btn-sm">Start test</SubmitButton></form>)} /></div> : null}
         </Card>
         {[...(scannedRow ? [scannedRow] : []), ...serving, ...called].filter((q, i, a) => a.findIndex((x) => x.id === q.id) === i).map((q) => (
           <section key={q.id} className="glass next-step">
@@ -125,7 +133,7 @@ export default async function StationPage({ params, searchParams }: { params: Pr
 
   return (
     <>
-      <PageHead title={station ? station.name : 'My station'} meta={station ? `${station.code} · ${station.location}` : 'Choose your assigned station'}>
+      <PageHead title={station ? station.name : 'My station'} meta={station ? `${station.code}${station.location ? ` · ${station.location}` : ''}${onDutyName ? ` · On duty: ${onDutyName}` : ''}` : 'Choose your assigned station'}>
         {station ? <><StatusBadge status={station.status} /><LiveRefresh eventId={eventId} tables={['queue_assignments', 'stations']} url={env().NEXT_PUBLIC_SUPABASE_URL} anonKey={env().NEXT_PUBLIC_SUPABASE_ANON_KEY} pollMs={10000} /></> : null}
       </PageHead>
       <DutyPicker stations={stations} base={base} title="Station" current={at} />

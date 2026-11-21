@@ -12,7 +12,7 @@ export default async function Queues({ params }: { params: Promise<{ eventId: st
   const ctx = await requirePerm(eventId, 'queue.override', 'station.operate');
   const tz = ctx.event.timezone;
   const back = `/e/${eventId}/queues`;
-  const [{ data: stations }, { data: caps }, { data: problems }, { data: active }, { data: coverage }] = await Promise.all([
+  const [{ data: stations }, { data: caps }, { data: problems }, { data: active }, { data: coverage }, { data: duty }] = await Promise.all([
     ctx.supabase.from('stations').select('id, code, name, kind, status, pause_reason').eq('event_id', eventId).in('kind', ['station', 'walkin_centre']).order('code'),
     ctx.supabase.from('station_capabilities').select('station_id, service_id').eq('event_id', eventId),
     ctx.supabase.from('participant_tasks').select('id, service_id, service_name, status, status_reason, waiting_since, updated_at, location, registration_id, registrations(registration_code, participants(full_name))')
@@ -20,7 +20,9 @@ export default async function Queues({ params }: { params: Promise<{ eventId: st
     ctx.supabase.from('queue_assignments').select('id, station_id, state, seq, task_id, participant_tasks(service_id, service_name), registrations(registration_code)')
       .eq('event_id', eventId).in('state', ['queued', 'called', 'in_service']).order('seq'),
     ctx.supabase.rpc('service_coverage', { p_event: eventId }),
+    ctx.supabase.rpc('station_on_duty', { p_event: eventId }),
   ]);
+  const staffAt = (id: string) => ((duty ?? []) as { station_id: string; staff: string }[]).find((d) => d.station_id === id)?.staff;
   type Cov = { service_id: string; service_name: string; station_id: string | null; station_code: string | null; station_name: string | null;
     station_status: string | null; accepts: boolean | null; staff_now: number; next_shift: string | null; waiting: number };
   const services = [...new Map(((coverage ?? []) as Cov[]).map((c) => [c.service_id, c])).values()].map((svc) => {
@@ -77,7 +79,7 @@ export default async function Queues({ params }: { params: Promise<{ eventId: st
         {(stations ?? []).map((s) => {
           const q = (active ?? []).filter((a) => a.station_id === s.id);
           return (
-            <Card key={s.id} title={`${s.name}`} sub={`${s.code}${s.pause_reason ? ` · ${s.pause_reason}` : ''}`} actions={<StatusBadge status={s.status} />}>
+            <Card key={s.id} title={`${s.name}`} sub={`${s.code} · ${staffAt(s.id) ? `On duty: ${staffAt(s.id)}` : 'no staff on shift now'}${s.pause_reason ? ` · ${s.pause_reason}` : ''}`} actions={<StatusBadge status={s.status} />}>
               {ctx.can('station.operate') ? (
                 <div className="row" style={{ marginBottom: 12 }}>
                   {s.status !== 'open' ? <RpcForm eventId={eventId} rpc="station_set_status" back={back} ok={`${s.name} opened`} hidden={{ p_station: s.id, p_status: 'open' }}><SubmitButton className="btn btn-green btn-sm">Open</SubmitButton></RpcForm> : null}

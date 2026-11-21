@@ -34,6 +34,7 @@ export default async function TagPage({ params }: { params: Promise<{ eventId: s
   const unpaid = (tasks ?? []).some((t) => t.payment_intent_id && !(t as unknown as { payment_cleared: boolean }).payment_cleared && !['cancelled', 'completed'].includes(t.status));
   const waiting = (tasks ?? []).some((t) => t.status === 'waiting_unassigned');
   const st = active?.stations as unknown as { name: string; code: string; location: string; instructions: string } | undefined;
+  const staff = active ? ((await ctx.supabase.rpc('station_on_duty', { p_event: eventId })).data as { station_id: string; staff: string }[] | null)?.find((x) => x.station_id === active.station_id)?.staff : undefined;
   const ahead = active?.state === 'queued'
     ? (await ctx.supabase.from('queue_assignments').select('id', { count: 'exact', head: true }).eq('station_id', active.station_id).eq('state', 'queued').lt('seq', active.seq)).count ?? 0 : 0;
   const methods = (ctx.event.settings.payment_methods as string[] | undefined) ?? [];
@@ -53,6 +54,7 @@ export default async function TagPage({ params }: { params: Promise<{ eventId: s
         <div className="eyebrow">Send the participant to</div>
         {active && st ? (<>
           <div className="where">{st.name} <span className="mono small muted">{st.code}</span></div>
+          {staff ? <div className="text2" style={{ marginBottom: 6 }}>Staff: <strong>{staff}</strong></div> : null}
           <div className="row"><span className="ticket">#{active.seq}</span>
             <span className="text2">{(active.participant_tasks as unknown as { service_name: string }).service_name} · {active.state === 'called' ? 'called now — go straight there' : active.state === 'in_service' ? 'being served' : ahead ? `${ahead} ahead` : 'next in line'}</span></div>
           {st.location ? <div className="small text2" style={{ marginTop: 6 }}>{st.location}{st.instructions ? ` · ${st.instructions}` : ''}</div> : null}
@@ -88,8 +90,8 @@ export default async function TagPage({ params }: { params: Promise<{ eventId: s
               {paid && i ? <Link className="btn btn-ghost btn-sm" style={{ marginTop: 6 }} href={`/e/${eventId}/receipts/${i.id}`}>Print receipt</Link> : null}
             </div>); })}
         </Card>) : null}
-      <Card className="no-print" title={isReprint ? `Tag v${reg.tag_version} already issued` : 'Print the participant tag'}
-        sub="If printing fails, the registration is safe: reprint with a reason. Check the label before attaching it.">
+      <Card className="no-print" title={isReprint ? `Tag v${reg.tag_version} already issued` : 'Print or display the participant tag'}
+        sub="If printing fails, the registration is safe: display the tag on screen, or reprint with a reason. Check the label before giving it.">
         {isReprint && !ctx.can('tag.reprint') ? <div className="alert alert-warn">A supervisor must reprint this tag.</div> : (
           <TagPrinter eventId={eventId} regId={regId} isReprint={isReprint}
             info={{ code: reg.registration_code, name: p.full_name, age: p.age, pkg: (reg.packages as unknown as { name: string }).name, event: ctx.event.name, showAge: l.showAge, w: l.w, h: l.h }} />
@@ -97,10 +99,10 @@ export default async function TagPage({ params }: { params: Promise<{ eventId: s
       </Card>
       {reg.tag_version > 0 ? (
         <Card className="no-print" title="Confirm the tag">
-          {reg.tag_printed_confirmed_at ? <div className="alert alert-ok">Tag v{reg.tag_version} confirmed printed and attached.</div> : (
+          {reg.tag_printed_confirmed_at ? <div className="alert alert-ok">Tag v{reg.tag_version} confirmed given to the participant.</div> : (
             <RpcForm eventId={eventId} rpc="confirm_tag_printed" back={back} ok="Tag confirmed" hidden={{ p_reg: regId }}>
-              <p className="small text2">Confirm the printed tag shows <strong>{reg.registration_code}</strong> and is attached to the right participant.</p>
-              <SubmitButton className="btn btn-green">Printed and attached</SubmitButton>
+              <p className="small text2">Confirm the tag shows <strong>{reg.registration_code}</strong> and the right participant has it — printed and attached, or shown on screen and scanned/photographed on their phone.</p>
+              <SubmitButton className="btn btn-green">Tag given to participant</SubmitButton>
             </RpcForm>)}
         </Card>) : null}
     </>

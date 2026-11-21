@@ -25,27 +25,36 @@ async function admin(fd: FormData, defaultReason?: string) {
 const iso = (fd: FormData, k: string, tz: string) => (str(fd, k) ? localInputToIso(str(fd, k), tz) : null);
 
 export async function saveEventProfile(fd: FormData) {
-  const { eventId, ctx, db, done } = await admin(fd);
+  const { eventId, ctx, db, done, back } = await admin(fd);
   const tz = str(fd, 'timezone') || ctx.event.timezone;
+  const preset = str(fd, 'code_format_preset');
+  const format = (preset && preset !== 'custom' ? preset : str(fd, 'code_format')).replace(/\s+/g, '');
+  if (!format.includes('{SEQ}')) go(back, 'err', 'The code format must contain {SEQ} (the running number), e.g. {PREFIX}{SEQ} gives VV001.');
+  if (/[^A-Za-z0-9{}_-]/.test(format) || /\{(?!PREFIX\}|CLS\}|YEAR\}|SEQ\})/.test(format)) go(back, 'err', 'The code format may use letters, digits, - and _ plus the tokens {PREFIX} {CLS} {YEAR} {SEQ}.');
+  if (format.length > 60) go(back, 'err', 'The code format is too long.');
   const { error } = await db.from('events').update({
     name: str(fd, 'name'), sponsor_name: str(fd, 'sponsor_name'), lab_partner_name: str(fd, 'lab_partner_name'),
     venue: str(fd, 'venue'), help_contact: str(fd, 'help_contact'), portal_instructions: str(fd, 'portal_instructions'),
     timezone: tz, starts_at: iso(fd, 'starts_at', tz), ends_at: iso(fd, 'ends_at', tz),
     registration_opens_at: iso(fd, 'registration_opens_at', tz), registration_closes_at: iso(fd, 'registration_closes_at', tz),
     expected_attendance: intOrNull(fd, 'expected_attendance') ?? 500, code_prefix: str(fd, 'code_prefix').toUpperCase(),
-    code_year: intOrNull(fd, 'code_year'), code_format: str(fd, 'code_format'), code_seq_digits: intOrNull(fd, 'code_seq_digits') ?? 6,
+    code_year: intOrNull(fd, 'code_year') ?? Number(ctx.event.code_year), code_format: format, code_seq_digits: intOrNull(fd, 'code_seq_digits') ?? 6,
   }).eq('id', eventId);
   done(error, 'Event profile saved');
 }
 
 export async function saveEventSettings(fd: FormData) {
-  const { eventId, ctx, db, done } = await admin(fd);
+  const { eventId, ctx, db, done, back } = await admin(fd);
+  const days = str(fd, 'report_access_days');
+  if (days && !/^\d{1,3}$/.test(days)) go(back, 'err', 'Days reports stay online must be a whole number (blank for no limit).');
+  if (days && !ctx.event.ends_at && !ctx.event.starts_at) go(back, 'err', 'Set the event Ends date in Event profile first — the online report window is counted from it.');
   // payment model, methods and UPI details are saved by savePaymentSetup and kept here as they are
   const settings = {
     ...ctx.event.settings,
     require_consent: bool(fd, 'require_consent'), payment_maker_checker: bool(fd, 'payment_maker_checker'),
     report_maker_checker: bool(fd, 'report_maker_checker'), portal_otp_required: true,
     grouping_approved: bool(fd, 'grouping_approved'), default_service_minutes: intOrNull(fd, 'default_service_minutes') ?? 5,
+    report_access_days: days ? Number(days) : null, report_closed_note: str(fd, 'report_closed_note').slice(0, 300),
     label: { width_mm: intOrNull(fd, 'label_w') ?? 90, height_mm: intOrNull(fd, 'label_h') ?? 55, show_age: bool(fd, 'label_show_age') },
   };
   const { error } = await db.from('events').update({ settings }).eq('id', eventId);

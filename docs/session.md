@@ -517,3 +517,16 @@ This session implemented **three major operational enhancements**:
 
 
 
+
+---
+
+# Engineering Session Log — 2026-11-23 (camp-day polish)
+
+**Migration:** `20261123000023_camp_day_polish.sql` (dry-run verified on the hosted DB inside a rolled-back transaction).
+
+1. **Registration test search (ECG / 2D Echo missing)** — Root cause: the picker listed only tests with `addon_available` *and* an active price; tests created in the package builder without a price were silently hidden. Now every active test is listed (unpriced ones greyed out as "no price set" with a link to Prices), search ignores spaces/dashes/case and also matches the test code. DB trigger `price_makes_sellable`: saving an active price marks the test sellable (backfilled).
+2. **Display tag** — Tag screen offers *Print tag* and *Display tag on screen* (large QR for the patient's phone camera), plus *Save as image* (PNG). The portal has a "Show my tag" QR so the phone works as the tag at stations. Confirmation step renamed "Tag given to participant".
+3. **Registration desk order** — "1 · Register new patient" first, "2 · Check for an existing patient" second.
+4. **Registration code format** — Presets (e.g. `{PREFIX}{SEQ}` → `VV001`) or custom; `{CLS}` optional. Without `{CLS}` all packages share one running number (`package_code_counters.classification = '_all'`). `_next_registration_code` skips any code already issued, and the number grows past the digit count instead of truncating.
+5. **Online report window** — `settings.report_access_days` (+ optional `report_closed_note`): reports stay online until 23:59 (event timezone) N days after the event end date; afterwards `portal_otp_request` / `portal_reports` raise `reports_closed` and the portal shows the walk-in centre(s) instead. Requires the event Ends date.
+6. **Staff names & one-tap start** — `station_on_duty(event)` shows who is on shift at each station (tag page "Send the participant to", station header, Queue control, participant portal next step). At a station, scanning a tag or picking a name match starts the test immediately (claims the patient from another compatible station if needed); Complete sends them to the next station automatically.

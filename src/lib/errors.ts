@@ -21,6 +21,7 @@ const MESSAGES: Record<string, string> = {
   choice_locked: 'The selection can no longer be changed.',
   rate_limited: 'Too many attempts. Please wait and try again.',
   no_mobile: 'No mobile number is on file. Please contact the help desk.',
+  reports_closed: 'Online viewing of reports has ended. Please collect your reports at the walk-in centre.',
   verification_required: 'Please verify with the code sent to your mobile.',
   duplicate_has_activity: 'Tasks were already performed on this registration.',
   participant_busy: 'The participant already has another active assignment.',

@@ -316,6 +316,13 @@ tr.selected { background: var(--accent-soft2); }
 .tag .t-qr svg { width: 26mm; height: 26mm; display: block; }
 .tag .t-bar { grid-column: 1 / -1; }
 .tag .t-bar svg { width: 100%; height: 11mm; display: block; }
+/* on-screen tag for patients to scan / photograph when no printer is available */
+.tag-display { background: #fff; color: #000; border-radius: 16px; padding: 20px 16px; max-width: 420px; margin: 0 auto 14px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; font-family: Arial, Helvetica, sans-serif; }
+.tag-display .td-qr svg { width: min(300px, 70vw); height: auto; display: block; margin: 6px 0; }
+.tag-display .td-code { font-size: 1.6rem; font-weight: 700; letter-spacing: 0.02em; }
+.tag-display .td-name { font-size: 1.25rem; font-weight: 700; }
+.tag-display .td-bar svg { width: min(320px, 76vw); height: 56px; display: block; margin-top: 6px; }
 @media print {
   @page { size: var(--tag-w, 90mm) var(--tag-h, 55mm); margin: 0; }
   body { background: #fff !important; }

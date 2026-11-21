@@ -18,6 +18,22 @@ export default async function PortalReports({ params, searchParams }: { params: 
   const tokenHash = sha256(token);
   const { data: reg } = await svc.rpc('portal_registration', { p_token_hash: tokenHash });
   if (!reg) return <Invalid />;
+  const { data: view } = await svc.rpc('portal_view', { p_token_hash: tokenHash });
+  const ev = (view as { event: { reports_closed: boolean; reports_note: string | null } } | null)?.event;
+  const centres = (view as { report_centres?: { name: string; address: string; hours: string }[] } | null)?.report_centres ?? [];
+  if (ev?.reports_closed) {
+    return (
+      <main className="portal"><div className="portal-inner">
+        <div className="row-between" style={{ marginBottom: 16 }}><div className="brand"><KriyaMark /><span>Kriya AI</span></div>
+          <Link className="btn btn-ghost btn-sm" href={`/p/${token}`}>Back to progress</Link></div>
+        <div className="card">
+          <h3>My reports</h3>
+          <p className="text2" style={{ marginTop: 10 }}>{ev.reports_note || 'Online viewing of reports has ended. Please collect your reports at the walk-in centre — bring your tag or registration code.'}</p>
+          {centres.map((c) => <div key={c.name} className="alert alert-info" style={{ marginTop: 8, display: 'block' }}><div className="strong">{c.name}</div><div className="small">{c.address || 'Address at the help desk'}{c.hours ? ` · ${c.hours}` : ''}</div></div>)}
+        </div>
+      </div></main>
+    );
+  }
   const session = (await cookies()).get('portal_s')?.value;
   const { data: reports, error } = session ? await svc.rpc('portal_reports', { p_token_hash: tokenHash, p_session_hash: sha256(session) }) : { data: null, error: true };
 

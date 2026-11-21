@@ -8,16 +8,20 @@ import { dt, inr, locationLabel, statusLabel } from '@/lib/format';
 import { rateLimited } from '@/lib/ratelimit';
 import { serviceClient } from '@/lib/supabase/server';
 import { sha256 } from '@/lib/tokens';
+import { code128Svg, qrSvg } from '@/lib/barcodes';
+import { env } from '@/lib/env';
 import { Invalid } from './Invalid';
 
 export const metadata: Metadata = { title: 'My health camp progress', referrer: 'no-referrer' };
 
 type View = {
-  event: { name: string; venue: string; help: string; instructions: string; timezone: string; lab_partner: string; status: string; upi_vpa: string | null; upi_payee_name: string | null };
+  event: { name: string; venue: string; help: string; instructions: string; timezone: string; lab_partner: string; status: string; upi_vpa: string | null; upi_payee_name: string | null;
+    reports_until: string | null; reports_closed: boolean; reports_note: string | null };
   registration: { code: string; first_name: string; package: string; created_at: string; has_mobile: boolean };
-  next_step: { service: string; station: string; station_code: string; location: string; instructions: string; state: string; seq: number; ahead: number } | null;
+  next_step: { service: string; station: string; station_code: string; staff: string | null; location: string; instructions: string; state: string; seq: number; ahead: number } | null;
   tasks: { id: string; service: string; location: string; source: string; status: string; items: { id: string; name: string; report: string }[] | null }[];
   walkin_centres: { name: string; address: string; hours: string; instructions: string; valid_from: string | null; valid_to: string | null }[];
+  report_centres?: { name: string; address: string; hours: string; instructions: string }[];
   payments: { status: string; amount_paise: number; refunded_paise: number; receipt_no: string | null; items: string[]; kind: 'package' | 'addon' }[];
 };
 
@@ -80,7 +84,8 @@ export default async function Portal({ params }: { params: Promise<{ token: stri
           {v.next_step ? (
             <>
               <div className="small text2" style={{ marginTop: 6 }}>{STEP_TEXT[v.next_step.state] ?? 'Next'}</div>
-              <div className="where">{v.next_step.service} — {v.next_step.station}</div>
+              <div className="where">{v.next_step.station === v.next_step.service ? v.next_step.station : `${v.next_step.service} — ${v.next_step.station}`} <span className="mono small muted">{v.next_step.station_code}</span></div>
+              {v.next_step.staff ? <div className="text2" style={{ marginBottom: 6 }}>Staff: <strong>{v.next_step.staff}</strong> — tell them your code <span className="mono">{v.registration.code}</span></div> : null}
               <div className="row"><span className="ticket">#{v.next_step.seq}</span>
                 <span className="text2">{v.next_step.state === 'queued' ? (v.next_step.ahead ? `${v.next_step.ahead} ahead of you` : 'You are next') : statusLabel(v.next_step.state)}</span></div>
               {v.next_step.location ? <div className="small text2" style={{ marginTop: 8 }}><Icon name="pin" /> {v.next_step.location}</div> : null}
@@ -123,9 +128,29 @@ export default async function Portal({ params }: { params: Promise<{ token: stri
 
         <div className="card">
           <h3>Reports</h3>
-          <p className="small text2">{reportsAvailable ? 'Some reports are available.' : 'Reports appear here after the laboratory uploads and releases them.'} You will be asked for a one-time code sent to your registered mobile.</p>
-          <Link className="btn btn-accent btn-block" href={`/p/${token}/reports`}><Icon name="lock" />View my reports</Link>
+          {v.event.reports_closed ? (<>
+            <p className="small text2">{v.event.reports_note || 'Online viewing of reports has ended. Please collect your reports at the walk-in centre — bring your tag or registration code.'}</p>
+            {(v.report_centres ?? []).map((c) => (
+              <div key={c.name} className="alert alert-info" style={{ marginTop: 8, display: 'block' }}>
+                <div className="strong">{c.name}</div>
+                <div className="small">{c.address || 'Address at the help desk'}{c.hours ? ` · ${c.hours}` : ''}</div>
+                {c.instructions ? <div className="small">{c.instructions}</div> : null}
+              </div>))}
+          </>) : (<>
+            <p className="small text2">{reportsAvailable ? 'Some reports are available.' : 'Reports appear here after the laboratory uploads and releases them.'} You will be asked for a one-time code sent to your registered mobile.{v.event.reports_until ? ` Available online until ${dt(new Date(new Date(v.event.reports_until).getTime() - 60_000).toISOString(), tz)}; after that, collect them at the walk-in centre.` : ''}</p>
+            <Link className="btn btn-accent btn-block" href={`/p/${token}/reports`}><Icon name="lock" />View my reports</Link>
+          </>)}
         </div>
+
+        <details className="card">
+          <summary className="strong" style={{ cursor: 'pointer' }}>Show my tag (QR for the station staff)</summary>
+          <div className="tag-display" style={{ marginTop: 12 }}>
+            <div className="td-qr" dangerouslySetInnerHTML={{ __html: qrSvg(`${env().APP_URL}/p/${token}`) }} />
+            <div className="td-code">{v.registration.code}</div>
+            <div className="td-bar" dangerouslySetInnerHTML={{ __html: code128Svg(v.registration.code) }} />
+            <div className="small" style={{ color: '#555' }}>Show this screen at each station. Do not share it — it opens your personal page.</div>
+          </div>
+        </details>
 
         <div className="card small text2">
           <div className="strong">Need help?</div>

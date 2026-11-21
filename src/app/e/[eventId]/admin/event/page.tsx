@@ -4,10 +4,22 @@ import { RpcForm } from '@/components/RpcForm';
 import { SubmitButton } from '@/components/SubmitButton';
 import { Card, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
-import { isoToLocalInput } from '@/lib/format';
+import { dt, isoToLocalInput } from '@/lib/format';
 import { labelSettings } from '@/lib/label';
+import { nowMs } from '@/lib/clock';
 import { deleteEvent, resetEvent, saveEventProfile, saveEventSettings, savePaymentSetup } from '../actions';
 import { UpiPay } from '@/components/UpiPay';
+
+const CODE_PRESETS = [
+  { f: '{PREFIX}-{CLS}-{YEAR}-{SEQ}', label: 'Prefix, package, year, number' },
+  { f: '{PREFIX}{SEQ}', label: 'Prefix + number' },
+  { f: '{PREFIX}-{SEQ}', label: 'Prefix - number' },
+  { f: '{PREFIX}{CLS}{SEQ}', label: 'Prefix + package letter + number' },
+  { f: '{PREFIX}-{YEAR}-{SEQ}', label: 'Prefix, year, number' },
+];
+/** Same rule as the database (_next_registration_code), for the preview only. */
+const codeExample = (format: string, e: { code_prefix: string; code_year: number; code_seq_digits: number }, letter: string) =>
+  format.replaceAll('{PREFIX}', e.code_prefix).replaceAll('{CLS}', letter).replaceAll('{YEAR}', String(e.code_year)).replaceAll('{SEQ}', '1'.padStart(e.code_seq_digits, '0')).toUpperCase();
 
 const NEXT: Record<string, string[]> = { draft: ['ready', 'live'], ready: ['draft', 'live'], live: ['paused', 'closed'], paused: ['live', 'closed'], closed: ['live', 'archived'], archived: [] };
 
@@ -24,6 +36,14 @@ export default async function EventAdmin({ params }: { params: Promise<{ eventId
   const methods = (s.payment_methods as string[] | undefined) ?? [];
   const l = labelSettings(s);
   const f = (k: string) => String(e[k] ?? '');
+  const { data: pk } = await ctx.supabase.from('packages').select('code_letter').eq('event_id', eventId).eq('active', true).order('classification');
+  const letters = [...new Set((pk ?? []).map((p) => p.code_letter as string).filter(Boolean))];
+  if (!letters.length) letters.push('A');
+  const fmt = String(e.code_format);
+  const { data: until } = await ctx.supabase.rpc('reports_window', { p_event: eventId });
+  const reportsUntil = until ? new Date(until as string) : null;
+  const reportsClosed = !!reportsUntil && reportsUntil.getTime() <= nowMs();
+  const cfg = { code_prefix: String(e.code_prefix), code_year: Number(e.code_year), code_seq_digits: Number(e.code_seq_digits) };
 
   return (
     <>
@@ -106,11 +126,24 @@ export default async function EventAdmin({ params }: { params: Promise<{ eventId
           <div className="field"><label>Participant portal instructions</label><textarea name="portal_instructions" rows={2} defaultValue={e.portal_instructions} /></div>
           <div className="form-row">
             <div className="field"><label>Expected attendance</label><input type="number" name="expected_attendance" defaultValue={f('expected_attendance')} /></div>
-            <div className="field"><label>Code prefix</label><input name="code_prefix" defaultValue={f('code_prefix')} pattern="[A-Za-z0-9]{1,8}" /></div>
-            <div className="field"><label>Code year</label><input type="number" name="code_year" defaultValue={f('code_year')} /></div>
-            <div className="field"><label>Code format</label><input name="code_format" defaultValue={f('code_format')} /><span className="help">Tokens: {'{PREFIX} {CLS} {YEAR} {SEQ}'}</span></div>
-            <div className="field"><label>Sequence digits</label><input type="number" name="code_seq_digits" min={3} max={9} defaultValue={f('code_seq_digits')} /></div>
           </div>
+          <div className="label" style={{ marginTop: 6 }}>Patient registration code</div>
+          <p className="small text2" style={{ margin: '2px 0 10px' }}>Printed on the tag and used to search patients. Changing it affects new registrations only; codes already issued never change and are never reused.</p>
+          <div className="form-row">
+            <div className="field"><label htmlFor="cf">Format</label>
+              <select id="cf" name="code_format_preset" defaultValue={CODE_PRESETS.some((x) => x.f === fmt) ? fmt : 'custom'}>
+                {CODE_PRESETS.map((x) => <option key={x.f} value={x.f}>{x.label} — e.g. {codeExample(x.f, cfg, letters[0])}</option>)}
+                <option value="custom">Custom (type below)</option>
+              </select></div>
+            <div className="field"><label htmlFor="cfc">Custom format (only when Format is Custom)</label><input id="cfc" name="code_format" defaultValue={fmt} placeholder="{PREFIX}{SEQ}" />
+              <span className="help">{'{PREFIX}'} prefix · {'{CLS}'} package letter · {'{YEAR}'} year · {'{SEQ}'} running number (required). Other characters are kept, e.g. <span className="mono">{'CAMP-{SEQ}'}</span>.</span></div>
+          </div>
+          <div className="form-row">
+            <div className="field"><label htmlFor="cp">Prefix</label><input id="cp" name="code_prefix" defaultValue={f('code_prefix')} pattern="[A-Za-z0-9]{1,8}" required /><span className="help">1–8 letters/digits, e.g. VV</span></div>
+            <div className="field"><label htmlFor="cy">Year</label><input id="cy" type="number" name="code_year" defaultValue={f('code_year')} /></div>
+            <div className="field"><label htmlFor="cd">Number digits</label><input id="cd" type="number" name="code_seq_digits" min={3} max={9} defaultValue={f('code_seq_digits')} /><span className="help">3 → 001, 002 … (grows past 999 automatically)</span></div>
+          </div>
+          <div className="alert alert-info" style={{ marginBottom: 12 }}><span>Codes will look like: <strong className="mono">{letters.map((l) => codeExample(fmt, cfg, l)).filter((v, i, a) => a.indexOf(v) === i).join(' · ')}</strong>{fmt.includes('{CLS}') ? ' (each package has its own running number)' : ' (one running number shared by all packages)'}</span></div>
           <SubmitButton>Save profile</SubmitButton>
         </AdminForm>
       </Card>
@@ -129,6 +162,18 @@ export default async function EventAdmin({ params }: { params: Promise<{ eventId
               <p className="small muted">Who pays, UPI and cash are set in <strong>Payments at this camp</strong> above.</p>
             </div>
           </div>
+          <div className="label" style={{ marginTop: 6 }}>Online reports for patients</div>
+          <p className="small text2" style={{ margin: '2px 0 8px' }}>Patients open their reports by scanning the tag QR (with a one-time code). After the window below, the portal stops showing reports and tells them to collect them at the walk-in centre.</p>
+          <div className="form-row">
+            <div className="field"><label htmlFor="rad">Days reports stay online after the camp</label>
+              <input id="rad" type="number" name="report_access_days" min={0} max={365} defaultValue={String(s.report_access_days ?? '')} placeholder="No limit" />
+              <span className="help">Blank = no limit. 0 = only until the end of the camp day. 3 = until 11:59 pm on the third day after the camp ends (event end date).</span></div>
+            <div className="field"><label htmlFor="rcn">Message after the window closes (optional)</label>
+              <input id="rcn" name="report_closed_note" maxLength={300} defaultValue={String(s.report_closed_note ?? '')} placeholder="Please collect your reports at the walk-in centre. Bring your tag or registration code." /></div>
+          </div>
+          <div className={`alert ${reportsUntil && reportsClosed ? 'alert-warn' : 'alert-info'}`} style={{ marginBottom: 12 }}><span>{reportsUntil
+            ? <>Reports are online until <strong>{dt(new Date(reportsUntil.getTime() - 60_000).toISOString(), tz)}</strong>{reportsClosed ? ' — the window has closed; patients are sent to the walk-in centre.' : '.'}</>
+            : s.report_access_days != null && s.report_access_days !== '' ? <>Set the event <strong>Ends</strong> date in Event profile — the window is counted from it. Until then reports stay online without a limit.</> : 'Reports stay online with no time limit.'}</span></div>
           <div className="label" style={{ marginTop: 6 }}>Tag label</div>
           <div className="form-row">
             <div className="field"><label>Width (mm)</label><input type="number" name="label_w" defaultValue={l.w} min={30} max={200} /></div>

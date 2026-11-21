@@ -28,15 +28,16 @@ export default async function RegisterPage({ params, searchParams }: { params: P
   const sellTests = custom && !sponsored;
   // pay-per-test camps: the event's priced, sellable tests (current price; server recomputes)
   const [{ data: sellable }, { data: prices }, { data: pkgTests }] = sellTests ? await Promise.all([
-    ctx.supabase.from('test_catalog').select('id, display_name, category, location').eq('event_id', eventId).eq('active', true).eq('archived', false).eq('addon_available', true).order('category').order('display_name'),
+    // every active test is listed (unpriced ones greyed out) so the desk never "loses" ECG, 2D Echo…
+    ctx.supabase.from('test_catalog').select('id, code, display_name, category, location, addon_available').eq('event_id', eventId).eq('active', true).eq('archived', false).order('category').order('display_name'),
     ctx.supabase.from('addon_prices').select('test_id, price_paise, tax_paise, location_scope, effective_from, effective_to').eq('event_id', eventId).eq('active', true).order('effective_from', { ascending: false }),
     ctx.supabase.from('package_tests').select('test_id, packages!inner(classification)').eq('event_id', eventId),
   ]) : [{ data: [] }, { data: [] }, { data: [] }];
   const now = nowMs();
-  const pickTests: PickTest[] = (sellable ?? []).flatMap((t) => {
-    const p = (prices ?? []).find((x) => x.test_id === t.id && (x.location_scope === 'both' || x.location_scope === t.location)
-      && new Date(x.effective_from).getTime() <= now && (!x.effective_to || new Date(x.effective_to).getTime() > now));
-    return p ? [{ id: t.id, name: t.display_name, category: t.category, location: t.location, price_paise: p.price_paise + p.tax_paise }] : [];
+  const pickTests: PickTest[] = (sellable ?? []).map((t) => {
+    const p = t.addon_available ? (prices ?? []).find((x) => x.test_id === t.id && (x.location_scope === 'both' || x.location_scope === t.location)
+      && new Date(x.effective_from).getTime() <= now && (!x.effective_to || new Date(x.effective_to).getTime() > now)) : undefined;
+    return { id: t.id, code: t.code, name: t.display_name, category: t.category, location: t.location, price_paise: p ? p.price_paise + p.tax_paise : null };
   });
   const packageTests: Record<string, string[]> = {};
   for (const x of pkgTests ?? []) { const c = (x.packages as unknown as { classification: string }).classification; (packageTests[c] ??= []).push(x.test_id); }
@@ -52,7 +53,7 @@ export default async function RegisterPage({ params, searchParams }: { params: P
 
   return (
     <>
-      <PageHead title="Registration desk" meta={ctx.event.status !== 'live' ? <span className="badge amber">Event is {ctx.event.status}: registration is blocked until it is live</span> : 'Search first, then register once.'} />
+      <PageHead title="Registration desk" meta={ctx.event.status !== 'live' ? <span className="badge amber">Event is {ctx.event.status}: registration is blocked until it is live</span> : 'Register the patient, or check for an existing registration first.'} />
       <div className={`alert ${sponsored ? 'alert-info' : 'alert-warn'}`} role="note">
         {/* one span: .alert is a flex row, so bare text and <strong> would become separate columns */}
         {sponsored ? <span><strong>Sponsored camp</strong> — the organiser pays. Participants pay nothing here.</span>
@@ -61,37 +62,14 @@ export default async function RegisterPage({ params, searchParams }: { params: P
       <DutyPicker stations={stations} base={base} title="Counter" current={counter} />
       {counter ? (
         <div className="grid grid-2">
-          <Card title="1 · Check for an existing registration" sub="Search by an approved identifier before creating a new entry.">
-            <form method="get" action={base}>
-              <input type="hidden" name="at" value={counter} /><input type="hidden" name="checked" value="1" />
-              <div className="form-row">
-                <div className="field"><label htmlFor="q-emp">Employee ID</label><input id="q-emp" name="employee_id" defaultValue={sp.employee_id} autoFocus /></div>
-                <div className="field"><label htmlFor="q-mob">Mobile</label><input id="q-mob" name="mobile" inputMode="numeric" defaultValue={sp.mobile} /></div>
-              </div>
-              <div className="field"><label htmlFor="q-name">Full name</label><input id="q-name" name="name" defaultValue={sp.name} /></div>
-              <button className="btn btn-ghost"><Icon name="search" />Check duplicates</button>
-            </form>
-            {checked ? (dupes.length ? (
-              <div style={{ marginTop: 16 }}>
-                <div className="alert alert-warn" role="alert">Possible existing registration{dupes.length > 1 ? 's' : ''}. Confirm with the participant before creating a new one.</div>
-                <ul className="list">{dupes.map((d: { registration_id: string; registration_code: string; full_name: string; match: string; status: string; created_at: string; classification: string; mobile_last4: string | null }) => (
-                  <li key={d.registration_id}>
-                    <div><Link className="strong" href={`/e/${eventId}/participants/${d.registration_id}`}>{d.registration_code}</Link> · {d.full_name}
-                      <div className="small muted">matched on {d.match} · {classLabel(d.classification)} · mobile …{d.mobile_last4 ?? '—'} · {dt(d.created_at, ctx.event.timezone)}</div></div>
-                    <StatusBadge status={d.status} />
-                  </li>))}</ul>
-              </div>
-            ) : <div className="alert alert-ok" style={{ marginTop: 16 }}>No existing registration found for these details.</div>) : null}
-          </Card>
-
-          <Card title="2 · Register participant" sub={sellTests ? 'Choose a package, individual paid tests, or both.' : custom ? 'Choose the package.' : 'The package is selected automatically from the Female/Male classification.'}>
+          <Card title="1 · Register new patient" sub={sellTests ? 'Choose a package, individual paid tests, or both.' : custom ? 'Choose the package.' : 'The package is selected automatically from the Female/Male classification.'}>
             <form action={registerParticipant}>
               <input type="hidden" name="event_id" value={eventId} /><input type="hidden" name="counter" value={counter} />
               <input type="hidden" name="idem" value={await idemKey()} />
               <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
                 <legend className="label" style={{ marginBottom: 8 }}>{custom ? 'Package' : 'Classification (required)'}</legend>
                 <div className="choice-cards">
-                  {sellTests && pickTests.length ? (
+                  {sellTests && pickTests.some((t) => t.price_paise != null) ? (
                     <label className="choice-card">
                       <input type="radio" name="classification" value="" defaultChecked />
                       <span className="title">Tests only</span>
@@ -100,7 +78,7 @@ export default async function RegisterPage({ params, searchParams }: { params: P
                     </label>) : null}
                   {pkgChoices.map((p) => (
                     <label key={p.id} className="choice-card">
-                      <input type="radio" name="classification" value={p.classification} required={!sellTests || !pickTests.length} disabled={!p.active} />
+                      <input type="radio" name="classification" value={p.classification} required={!sellTests || !pickTests.some((t) => t.price_paise != null)} disabled={!p.active} />
                       <span className="title">{classLabel(p.classification)}</span>
                       <span className="small text2">{p.name}</span>
                       {testsOf(p.id).length ? <span className="small muted" title={testsOf(p.id).join(', ')}>{testsOf(p.id).length} tests: {testsOf(p.id).slice(0, 5).join(', ')}{testsOf(p.id).length > 5 ? ` +${testsOf(p.id).length - 5} more` : ''}</span> : null}
@@ -109,9 +87,9 @@ export default async function RegisterPage({ params, searchParams }: { params: P
                   ))}
                 </div>
               </fieldset>
-              {sellTests && pickTests.length ? <TestPicker tests={pickTests} packageTests={packageTests} /> : null}
+              {sellTests && pickTests.length ? <TestPicker tests={pickTests} packageTests={packageTests} priceHref={ctx.can('addon.price.edit') ? `/e/${eventId}/admin/prices` : undefined} /> : null}
               {sellTests && !pickTests.length ? <p className="small muted">No priced tests yet — add them (or upload a CSV) in the Test catalogue to sell individual tests here.</p> : null}
-              <div className="field"><label htmlFor="full_name">Full name</label><input id="full_name" name="full_name" required maxLength={120} defaultValue={sp.name} /></div>
+              <div className="field"><label htmlFor="full_name">Full name</label><input id="full_name" name="full_name" required maxLength={120} defaultValue={sp.name} autoFocus /></div>
               <div className="form-row">
                 <div className="field"><label htmlFor="age">Age</label><input id="age" name="age" type="number" min={0} max={120} /></div>
                 <div className="field"><label htmlFor="employee_id">Employee ID</label><input id="employee_id" name="employee_id" maxLength={40} defaultValue={sp.employee_id} /></div>
@@ -136,9 +114,32 @@ export default async function RegisterPage({ params, searchParams }: { params: P
               ) : null}
               <label className="check"><input type="checkbox" name="consent" required={requireConsent} data-required={requireConsent ? '1' : '0'} />
                 <span className="small">Participant has read the privacy notice and consents to registration{requireConsent ? ' (required)' : ''}{custom ? ', and confirms the selected tests and price' : ''}.</span></label>
-              <div style={{ marginTop: 14 }}><SubmitButton className="btn btn-accent btn-lg btn-block">Register and print tag</SubmitButton></div>
+              <div style={{ marginTop: 14 }}><SubmitButton className="btn btn-accent btn-lg btn-block">Register patient</SubmitButton></div>
             </form>
           </Card>
+          <Card title="2 · Check for an existing patient" sub="Search by an approved identifier before creating a new entry.">
+            <form method="get" action={base}>
+              <input type="hidden" name="at" value={counter} /><input type="hidden" name="checked" value="1" />
+              <div className="form-row">
+                <div className="field"><label htmlFor="q-emp">Employee ID</label><input id="q-emp" name="employee_id" defaultValue={sp.employee_id} /></div>
+                <div className="field"><label htmlFor="q-mob">Mobile</label><input id="q-mob" name="mobile" inputMode="numeric" defaultValue={sp.mobile} /></div>
+              </div>
+              <div className="field"><label htmlFor="q-name">Full name</label><input id="q-name" name="name" defaultValue={sp.name} /></div>
+              <button className="btn btn-ghost"><Icon name="search" />Check duplicates</button>
+            </form>
+            {checked ? (dupes.length ? (
+              <div style={{ marginTop: 16 }}>
+                <div className="alert alert-warn" role="alert">Possible existing registration{dupes.length > 1 ? 's' : ''}. Confirm with the participant before creating a new one.</div>
+                <ul className="list">{dupes.map((d: { registration_id: string; registration_code: string; full_name: string; match: string; status: string; created_at: string; classification: string; mobile_last4: string | null }) => (
+                  <li key={d.registration_id}>
+                    <div><Link className="strong" href={`/e/${eventId}/participants/${d.registration_id}`}>{d.registration_code}</Link> · {d.full_name}
+                      <div className="small muted">matched on {d.match} · {classLabel(d.classification)} · mobile …{d.mobile_last4 ?? '—'} · {dt(d.created_at, ctx.event.timezone)}</div></div>
+                    <StatusBadge status={d.status} />
+                  </li>))}</ul>
+              </div>
+            ) : <div className="alert alert-ok" style={{ marginTop: 16 }}>No existing registration found for these details.</div>) : null}
+          </Card>
+
         </div>
       ) : null}
     </>
