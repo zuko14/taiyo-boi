@@ -98,3 +98,17 @@ describe('catalogue import', () => {
     expect(priceToPaise('12.345')).toBe('invalid');
   });
 });
+
+import { mapPackages } from '@/lib/catalog-import';
+describe('package import', () => {
+  it('expands a ;-separated test list and keeps one price per package', () => {
+    const r = mapPackages(parseCsv('package_code,package_name,code_letter,price_inr,test\nAARUSH,Taiyo Aarush Executive Plus,A,"₹4,499",FBS; HbA1c; CBC\nAARUSH,,,,2D Echo\nBASIC,Basic,B,999,CBC\n'));
+    expect(r.errors).toEqual([]);
+    expect(r.rows.map((x) => [x.package_code, x.test, x.price_paise])).toEqual([
+      ['AARUSH', 'FBS', 449900], ['AARUSH', 'HbA1c', 449900], ['AARUSH', 'CBC', 449900], ['AARUSH', '2D Echo', null], ['BASIC', 'CBC', 99900]]);
+  });
+  it('rejects conflicting prices and bad codes', () => {
+    const r = mapPackages(parseCsv('package_code,price_inr,test\nA,100,CBC\nA,200,LFT\nbad code!,,CBC\n'));
+    expect(r.errors.map((e) => e.line)).toEqual([3, 4]);
+  });
+});

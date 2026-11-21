@@ -38,11 +38,12 @@ export default async function Staff({ params }: { params: Promise<{ eventId: str
     <>
       <PageHead title="Staff & shifts" meta="Staff need an event role and an active shift at their counter/station. Shift history is kept." />
       <Card title="Assign a shift">
-        <RpcForm eventId={eventId} rpc="assign_staff" back={back} ok="Shift assigned">
+        <RpcForm eventId={eventId} rpc="assign_staff" back={back} ok="Shift assigned — the right access for that station was given automatically">
           <div className="form-row">
             <div className="field"><label>Staff member</label><select name="p_user" required>{ppl.map((p) => <option key={p.user_id} value={p.user_id}>{p.full_name} · {p.roles.map(roleName).join(', ')}</option>)}</select></div>
-            <div className="field"><label>Counter / station</label><select name="p_station" required>{(stations ?? []).map((s) => <option key={s.id} value={s.id}>{s.name} — {does(s.id, s.kind)}</option>)}</select>
-              <span className="help">Phlebotomists → a sample collection station; X-Ray technicians → an X-Ray station. The shift decides where the person works and what they see.</span></div>
+            <div className="field"><label>Counter / station</label><select name="p_station" required>{([['station', 'Diagnostic stations'], ['registration_counter', 'Registration counters'], ['addon_desk', 'Add-on / payment desks'], ['walkin_centre', 'Walk-in centres']] as const).map(([k, label]) => {
+              const list = (stations ?? []).filter((s) => s.kind === k); return list.length ? <optgroup key={k} label={label}>{list.map((s) => <option key={s.id} value={s.id}>{s.name} — {does(s.id, s.kind)}</option>)}</optgroup> : null; })}</select>
+              <span className="help">The shift decides where the person works and what they see. If they don&apos;t already have it, they automatically get the role that station needs (blood collection → Phlebotomist, X-Ray / Ultrasound / 2D Echo → radiology technician, registration → Registration Desk, and Cashier where patients pay).</span></div>
             <div className="field"><label>Shift start</label><input type="datetime-local" name="p_start_local" required defaultValue={startDefault} /></div>
             <div className="field"><label>Shift end</label><input type="datetime-local" name="p_end_local" required defaultValue={endDefault} /></div>
           </div>

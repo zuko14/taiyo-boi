@@ -113,6 +113,24 @@ Dated 10 Nov 2026 unless noted. “Provisional” means configurable and awaitin
 - Registration package cards list their tests.
 - The automatic **Pay per test** package can never hold tests or a price (database trigger + `set_package_rate` guard); migration 19 removes any that were added, so tests-only patients get exactly what they pick. Existing registrations keep their snapshot.
 
+## 2026-11-21 — imaging tests in packages, multi-visit rooms
+
+- The lab MRP list has only lab tests, so ECG / Ultrasound / 2D Echo / X-Ray tests did not exist to add to packages. The package builder can now create such a test in place (name, category, optional price, visit chosen or created), saved atomically through `import_catalog` with a fresh code, then added to the package.
+- A station's typed visits are comma-separated ("Ultrasound (USG), 2D Echo"), so one room can do several visits; each is its own queue stop at that room. If nothing is ticked or typed, the station name becomes its visit (any "blood"/"sample" name maps to the shared SAMPLE visit).
+- Visit suggestions include Ultrasound (USG) and 2D Echo for stations, tests and packages.
+
+## 2026-11-22 — package CSV import, compact admin lists
+
+- **Package CSV** (`import_packages`, needs package.edit + package.test_mapping.edit, custom camps only): one row per test (`package_code, package_name, code_letter, price_inr, description, test`; a test cell may hold several separated by `;`). Packages are created/updated by code and each named package's plain test list is replaced by the file; unnamed packages are untouched. Tests match by catalogue code or exact name and must be active and linked to a visit. All or nothing. Template + export at `/admin/packages/template[?current=1]`; the export re-imports unchanged.
+- Packages page: a searchable summary list (tests, queue stops, price, status); one package opens at a time (`?pkg=`), create/import/visits are collapsible. Creating a package opens it.
+- Test catalogue: search, category and status filters (incl. "not linked to a visit"), 50 per page; upload and "Add a test" are collapsible; edits return to the same filtered page.
+
+## 2026-11-22 — shifts bring their access
+
+- `assign_staff` now calls `_grant_duty_roles`: if the person lacks the key permission for the station's job, the matching role is granted or reactivated and audited (`staff.role_auto`): SAMPLE visit → phlebotomist; X-Ray/USG/Ultrasound/Echo/Mammography visits → radiology technician; other diagnostic stations → station technician; registration counter → registration desk; add-on desk → add-on desk; walk-in centre → walk-in staff. Patient-pays custom camps also give the cashier role at registration counters and payment desks; sponsored/BOI camps keep payment verification separate. An explicit individual revoke still wins.
+- Anyone with an account on the event (even a removed role) can be given a shift.
+- Stations page: "On shift now" per station and an "Add staff" quick assign; the Staff & shifts picker groups stations by type.
+
 ## Open approvals (CLAUDE.md §20 highest priority)
 
 1. Lab Partner approval of catalogue, order codes, and test→visit grouping.

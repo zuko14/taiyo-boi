@@ -10,10 +10,18 @@ import Link from 'next/link';
 type Test = { id: string; code: string; display_name: string; category: string; source_wording: string; lab_order_code: string | null; instructions: string;
   location: string; active: boolean; archived: boolean; addon_available: boolean };
 
-export default async function Catalog({ params }: { params: Promise<{ eventId: string }> }) {
+const PAGE = 50;
+
+export default async function Catalog({ params, searchParams }: { params: Promise<{ eventId: string }>; searchParams: Promise<{ q?: string; cat?: string; show?: string; page?: string }> }) {
   const { eventId } = await params;
+  const sp = await searchParams;
   const ctx = await requirePerm(eventId, 'catalogue.view');
-  const back = `/e/${eventId}/admin/catalog`;
+  const base = `/e/${eventId}/admin/catalog`;
+  const qs = (over: Record<string, string | undefined>) => {
+    const u = new URLSearchParams(Object.entries({ q: sp.q, cat: sp.cat, show: sp.show, page: sp.page, ...over }).filter(([, v]) => v) as [string, string][]);
+    return u.size ? `${base}?${u}` : base;
+  };
+  const back = qs({});                                    // edits return to the same filtered page
   const live = isLive(ctx.event.status);
   const edit = ctx.can('catalogue.edit');
   const canPrice = ctx.can('addon.price.edit');
@@ -25,6 +33,17 @@ export default async function Catalog({ params }: { params: Promise<{ eventId: s
   ]);
   const priceOf = (id: string) => (prices ?? []).find((p) => p.test_id === id)?.price_paise;
   const svcOf = (id: string) => (map ?? []).find((m) => m.test_id === id);
+  const all = (tests ?? []) as Test[];
+  const categories = [...new Set(all.map((t) => t.category || 'Uncategorised'))].sort();
+  const q = (sp.q ?? '').trim().toLowerCase();
+  const show = sp.show ?? 'current';
+  const filtered = all.filter((t) => (!q || `${t.code} ${t.display_name} ${t.category} ${t.lab_order_code ?? ''}`.toLowerCase().includes(q))
+    && (!sp.cat || (t.category || 'Uncategorised') === sp.cat)
+    && (show === 'all' || (show === 'archived' ? t.archived : show === 'unlinked' ? !svcOf(t.id) && !t.archived : !t.archived)));
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
+  const page = Math.min(pages, Math.max(1, Number(sp.page) || 1));
+  const rows = filtered.slice((page - 1) * PAGE, page * PAGE);
+  const unlinked = all.filter((t) => !t.archived && !svcOf(t.id)).length;
 
   const form = (t?: Test) => (
     <AdminForm action={saveTest} eventId={eventId} back={back} live={live} hidden={{ id: t?.id }}>
@@ -58,34 +77,51 @@ export default async function Catalog({ params }: { params: Promise<{ eventId: s
 
   return (
     <>
-      <datalist id="visits-catalog"><option value="Blood sample collection" /><option value="X-Ray" /><option value="ECG" /><option value="BMD" /><option value="Body composition" /><option value="USG screening" /></datalist>
+      <datalist id="visits-catalog"><option value="Blood sample collection" /><option value="X-Ray" /><option value="ECG" /><option value="BMD" /><option value="Body composition" /><option value="USG screening" /><option value="Ultrasound (USG)" /><option value="2D Echo" /></datalist>
       <PageHead title="Test catalogue" meta={ctx.event.settings.package_mode === 'female_male'
         ? "Brochure shorthand (B2, BT2, D) is kept as supplied. Edit names/codes only from the Lab Partner's approved catalogue."
         : 'All tests offered at this camp. Add them to packages on the Packages page; an add-on price makes a test purchasable by participants.'} />
       {!edit ? <div className="alert alert-info">Read-only: you do not have catalogue.edit.</div> : null}
       {edit ? (
-        <Card title="Bulk upload tests and prices (CSV)" sub="Columns: code, name, category, price_inr, location (event_day / walk_in), service. Blank code is generated from the name; blank service = Sample collection. Re-uploading the same codes updates names and prices — existing orders keep their old price."
-          actions={<div className="row"><a className="btn btn-ghost btn-sm" href={`/e/${eventId}/admin/catalog/template`}>Download template</a>
-            <a className="btn btn-ghost btn-sm" href={`/e/${eventId}/admin/catalog/template?current=1`}>Export current catalogue</a></div>}>
+        <details className="card" open={!all.length}><summary className="strong" style={{ cursor: 'pointer' }}>Bulk upload tests and prices (CSV)</summary>
+          <p className="small text2">Columns: code, name, category, price_inr, location (event_day / walk_in), service. Blank code is generated from the name; blank service = Sample collection. Re-uploading the same codes updates names and prices — existing orders keep their old price.</p>
+          <div className="row" style={{ marginBottom: 10 }}><a className="btn btn-ghost btn-sm" href={`/e/${eventId}/admin/catalog/template`}>Download template</a>
+            <a className="btn btn-ghost btn-sm" href={`/e/${eventId}/admin/catalog/template?current=1`}>Export current catalogue</a></div>
           <p className="small muted" style={{ marginTop: 0 }}>Excel sheets work too (including the lab&apos;s MRP list with &ldquo;Test Description&rdquo; and &ldquo;MRP (INR)&rdquo; columns): open it in Excel and use File → Save As → CSV UTF-8. A price makes the test sellable; map tests to visits in the table below or via the service column. <Link href={`/e/${eventId}/admin/packages`}>Packages</Link> can then bundle them.</p>
-          <CatalogImport action={importCatalog} eventId={eventId} back={back} live={live} existing={((tests ?? []) as Test[]).map((t) => t.code)} />
-        </Card>) : null}
-      <Card>
+          <CatalogImport action={importCatalog} eventId={eventId} back={back} live={live} existing={all.map((t) => t.code)} />
+        </details>) : null}
+      {edit ? <details className="card" open={!all.length}><summary className="strong" style={{ cursor: 'pointer' }}>Add a test</summary><div style={{ marginTop: 12 }}>{form()}</div></details> : null}
+      <Card title={`Tests (${all.filter((t) => !t.archived).length})`} sub={unlinked ? <span><span className="badge red">{unlinked}</span> not linked to a visit — they cannot be queued. <Link href={qs({ show: 'unlinked', page: undefined })}>Show them</Link></span> : 'All tests are linked to a visit.'}>
+        <form method="get" className="row" role="search" style={{ marginBottom: 12 }}>
+          <input className="input" type="search" name="q" defaultValue={sp.q} placeholder="Search by name, code or category" aria-label="Search tests" style={{ flex: 2, minWidth: 180 }} />
+          <select className="input" name="cat" defaultValue={sp.cat ?? ''} aria-label="Category" style={{ flex: 1, minWidth: 150 }}>
+            <option value="">All categories ({categories.length})</option>{categories.map((c) => <option key={c} value={c}>{c} ({all.filter((t) => (t.category || 'Uncategorised') === c && !t.archived).length})</option>)}</select>
+          <select className="input" name="show" defaultValue={show} aria-label="Status" style={{ width: 170 }}>
+            <option value="current">Active & inactive</option><option value="unlinked">Not linked to a visit</option><option value="archived">Archived</option><option value="all">Everything</option></select>
+          <button className="btn btn-solid btn-sm">Filter</button>{sp.q || sp.cat || sp.show ? <Link className="btn btn-ghost btn-sm" href={base}>Clear</Link> : null}
+        </form>
+        <p className="small muted" style={{ margin: '0 0 8px' }}>{filtered.length} test{filtered.length === 1 ? '' : 's'}{pages > 1 ? ` · page ${page} of ${pages}` : ''}</p>
         <div className="table-wrap"><table>
-          <thead><tr><th>Code</th><th>Name</th><th>Original wording</th><th>Location</th><th>Service</th><th>Add-on</th><th>Add-on price</th><th>Status</th><th></th></tr></thead>
-          <tbody>{((tests ?? []) as Test[]).map((t) => (
+          <thead><tr><th>Test</th><th>Category</th><th>Visit</th><th>Price</th><th>Status</th><th></th></tr></thead>
+          <tbody>{rows.map((t) => (
             <tr key={t.id}>
-              <td className="mono">{t.code}</td><td className="strong">{t.display_name}</td><td className="small muted">{t.source_wording}</td>
-              <td>{locationLabel(t.location)}</td><td>{(services ?? []).find((s) => s.id === svcOf(t.id)?.service_id)?.name ?? <span className="badge red">no visit — cannot be queued</span>}</td>
-              <td>{t.addon_available ? 'Yes' : '—'}</td><td>{priceOf(t.id) != null ? inr(priceOf(t.id)!) : '—'}</td><td><StatusBadge status={t.archived ? 'archived' : t.active ? 'active' : 'closed'} label={t.archived ? 'Archived' : t.active ? 'Active' : 'Inactive'} /></td>
+              <td><span className="strong">{t.display_name}</span><div className="mono small muted">{t.code}{t.source_wording && t.source_wording !== t.display_name ? ` · was “${t.source_wording}”` : ''}{t.location === 'walk_in' ? ' · walk-in' : ''}</div></td>
+              <td className="small">{t.category || '—'}</td><td className="small">{(services ?? []).find((s) => s.id === svcOf(t.id)?.service_id)?.name ?? <span className="badge red">no visit — cannot be queued</span>}</td>
+              <td>{priceOf(t.id) != null ? inr(priceOf(t.id)!) : '—'}{priceOf(t.id) != null && !t.addon_available ? <div className="small muted">not for sale</div> : null}</td><td><StatusBadge status={t.archived ? 'archived' : t.active ? 'active' : 'closed'} label={t.archived ? 'Archived' : t.active ? 'Active' : 'Inactive'} /></td>
               <td><details><summary className="btn btn-ghost btn-sm">Edit</summary><div style={{ width: 'min(760px, 86vw)', whiteSpace: 'normal', padding: '12px 0' }}>{form(t)}
                 {edit ? <AdminForm action={deleteTest} eventId={eventId} back={back} live={live} hidden={{ id: t.id }} style={{ marginTop: 10 }}>
                   <SubmitButton className="btn btn-red btn-sm" confirm={`Delete ${t.display_name}? It is removed from every package and its add-on prices. Tests already ordered by participants cannot be deleted — archive them instead.`}>Delete test</SubmitButton>
                 </AdminForm> : null}</div></details></td>
-            </tr>))}</tbody>
+            </tr>))}
+            {!rows.length ? <tr><td colSpan={6} className="muted">{all.length ? 'No test matches these filters.' : 'No tests yet — upload a CSV or add one above.'}</td></tr> : null}</tbody>
         </table></div>
+        {pages > 1 ? (
+          <div className="row" style={{ marginTop: 12, justifyContent: 'center' }}>
+            {page > 1 ? <Link className="btn btn-ghost btn-sm" href={qs({ page: String(page - 1) })}>← Previous</Link> : null}
+            <span className="small muted">Page {page} of {pages}</span>
+            {page < pages ? <Link className="btn btn-ghost btn-sm" href={qs({ page: String(page + 1) })}>Next →</Link> : null}
+          </div>) : null}
       </Card>
-      {edit ? <Card title="Add a test">{form()}</Card> : null}
     </>
   );
 }

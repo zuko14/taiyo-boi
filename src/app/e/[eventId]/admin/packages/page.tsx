@@ -5,14 +5,17 @@ import { requirePerm } from '@/lib/auth';
 import Link from 'next/link';
 import { classLabel, inr, locationLabel } from '@/lib/format';
 import { PackageTestPicker } from '@/components/PackageTestPicker';
-import { addPackageTest, setPackageTests, createPackage, deletePackage, removePackageTest, saveChoiceGroup, savePackage, savePackageTest, saveService, setPackageRate } from '../actions';
+import { PackagesImport } from '@/components/PackagesImport';
+import { importPackages, addNewTestToPackage, addPackageTest, setPackageTests, createPackage, deletePackage, removePackageTest, saveChoiceGroup, savePackage, savePackageTest, saveService, setPackageRate } from '../actions';
 
 type Svc = { id: string; code: string; name: string; location: string; priority: number; est_minutes: number | null; instructions: string; active: boolean };
 
-export default async function Packages({ params }: { params: Promise<{ eventId: string }> }) {
+export default async function Packages({ params, searchParams }: { params: Promise<{ eventId: string }>; searchParams: Promise<{ pkg?: string; q?: string }> }) {
   const { eventId } = await params;
+  const sp = await searchParams;
   const ctx = await requirePerm(eventId, 'package.view');
-  const back = `/e/${eventId}/admin/packages`;
+  const base = `/e/${eventId}/admin/packages`;
+  const back = sp.pkg ? `${base}?pkg=${encodeURIComponent(sp.pkg)}` : base;   // actions return to the open package
   const live = isLive(ctx.event.status);
   const canPkg = ctx.can('package.edit'); const canMap = ctx.can('package.test_mapping.edit');
   const custom = (ctx.event.settings.package_mode ?? 'custom') !== 'female_male';
@@ -29,17 +32,36 @@ export default async function Packages({ params }: { params: Promise<{ eventId: 
   const test = (id: string) => (tests ?? []).find((t) => t.id === id);
   const svcName = (id?: string) => (services ?? []).find((s) => s.id === id)?.name;
   const svcOfTest = (id: string) => (map ?? []).find((m) => m.test_id === id)?.service_id;
+  const q = (sp.q ?? '').trim().toLowerCase();
+  const listed = (pkgs ?? []).filter((p) => !q || `${p.name} ${p.code}`.toLowerCase().includes(q))
+    .sort((a, b) => Number(a.code === 'PAY_PER_TEST') - Number(b.code === 'PAY_PER_TEST') || a.name.localeCompare(b.name));
 
   return (
     <>
+      <datalist id="visits-pkg"><option value="Blood sample collection" /><option value="ECG" /><option value="X-Ray" /><option value="Ultrasound (USG)" /><option value="2D Echo" /><option value="BMD" /><option value="Body composition" /></datalist>
       <PageHead title="Packages & services" meta={custom
         ? 'Create the packages offered at this camp, choose their tests and set prices. Changes apply to new registrations; existing ones keep their snapshot.'
         : 'Exactly two sponsored packages (Female / Male). Changes apply to new registrations; existing ones keep their snapshot.'}>
         <Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/admin/catalog`}>Test catalogue</Link>
         {ctx.can('addon.price.edit') ? <Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/admin/prices`}>Add-on prices</Link> : null}
       </PageHead>
+      {!sp.pkg ? (<>
+      <Card title={`Packages (${(pkgs ?? []).filter((p) => p.code !== 'PAY_PER_TEST').length})`} sub="Open a package to choose its tests, price and details."
+        actions={<form method="get" className="row" role="search"><input className="input" name="q" defaultValue={sp.q} placeholder="Search packages" aria-label="Search packages" style={{ width: 200, padding: '7px 12px' }} /><button className="btn btn-ghost btn-sm">Search</button></form>}>
+        {listed.length ? (
+          <div className="table-wrap"><table><thead><tr><th>Package</th><th>Tests</th><th>Queue stops</th><th>Price</th><th>Status</th><th></th></tr></thead>
+            <tbody>{listed.map((p) => { const n = (pts ?? []).filter((x) => x.package_id === p.id); const stops = new Set(n.map((x) => svcOfTest(x.test_id) ?? 'none')); return (
+              <tr key={p.id}><td><Link className="strong" href={`${base}?pkg=${p.id}`}>{p.name}</Link><div className="mono small muted">{p.code} · letter {p.code_letter}</div></td>
+                <td>{p.code === 'PAY_PER_TEST' ? <span className="muted small">picked at the desk</span> : n.length || <span className="badge red">none</span>}</td>
+                <td className="small">{p.code === 'PAY_PER_TEST' ? '—' : stops.size}</td>
+                <td>{!custom ? 'Sponsored' : p.price_paise ? inr(p.price_paise) : 'Free'}</td>
+                <td>{p.active ? <span className="badge green">Active</span> : <span className="badge">Inactive</span>}</td>
+                <td><Link className="btn btn-ghost btn-sm" href={`${base}?pkg=${p.id}`}>Open</Link></td></tr>); })}</tbody></table></div>
+        ) : <p className="muted small">{sp.q ? `No package matches “${sp.q}”.` : 'No packages yet.'}</p>}
+      </Card>
       {custom && canPkg ? (
-        <Card title="Create a package" sub="Then add tests from the catalogue to it. Create any missing tests in the Test catalogue first.">
+        <details className="card" open={!(pkgs ?? []).length}><summary className="strong" style={{ cursor: 'pointer' }}>Create a package</summary>
+        <div style={{ marginTop: 12 }}>
           <AdminForm action={createPackage} eventId={eventId} back={back} live={live}>
             <div className="form-row">
               <div className="field" style={{ flex: 2 }}><label>Package name</label><input name="name" required maxLength={120} placeholder="e.g. Executive Health Check" /></div>
@@ -49,10 +71,20 @@ export default async function Packages({ params }: { params: Promise<{ eventId: 
             <div className="field"><label>Description</label><input name="description" /></div>
             <SubmitButton className="btn btn-solid btn-sm">Create package</SubmitButton>
           </AdminForm>
-        </Card>) : null}
-      {!(pkgs ?? []).length ? <div className="alert alert-info">No packages yet.{custom ? ' Create one above.' : ''}</div> : null}
+        </div></details>) : null}
+      {custom && canPkg && canMap ? (
+        <details className="card"><summary className="strong" style={{ cursor: 'pointer' }}>Import packages from CSV</summary>
+          <div style={{ marginTop: 12 }}>
+            <p className="small muted" style={{ marginTop: 0 }}>One row per test: <span className="mono">package_code, package_name, code_letter, price_inr, description, test</span>. A test cell may list several tests separated by <span className="mono">;</span>. Tests are matched by catalogue code or exact name. Each package in the file gets exactly the tests listed; packages not in the file are untouched.</p>
+            <div className="row" style={{ marginBottom: 10 }}>
+              <a className="btn btn-ghost btn-sm" href={`${base}/template`}>Download template</a>
+              <a className="btn btn-ghost btn-sm" href={`${base}/template?current=1`}>Export current packages</a></div>
+            <PackagesImport action={importPackages} eventId={eventId} back={base} live={live} existing={(pkgs ?? []).map((p) => p.code)} />
+          </div>
+        </details>) : null}
+      </>) : <div className="row" style={{ marginBottom: 12 }}><Link className="btn btn-ghost btn-sm" href={base}>← All packages</Link></div>}
       {(checks ?? []).filter((c: { level: string }) => c.level === 'error').map((c: { message: string }, i: number) => <div key={i} className="alert alert-err">{c.message}</div>)}
-      {(pkgs ?? []).map((p) => {
+      {(pkgs ?? []).filter((p) => p.id === sp.pkg).map((p) => {
         const lines = (pts ?? []).filter((x) => x.package_id === p.id);
         const plain = lines.filter((x) => !x.choice_group_id);
         const pg = (groups ?? []).filter((g) => g.package_id === p.id);
@@ -127,6 +159,26 @@ export default async function Packages({ params }: { params: Promise<{ eventId: 
                       <PackageTestPicker tests={pickTests} initial={plain.map((l) => l.test_id)} />
                       <SubmitButton className="btn btn-solid" confirm="Save this package's tests? New registrations get the new list; existing ones keep theirs.">Save package tests</SubmitButton>
                     </AdminForm>
+                    {ctx.can('catalogue.edit') ? (
+                      <details style={{ marginTop: 12 }}>
+                        <summary className="btn btn-ghost btn-sm">Test not in the list? Create it here (e.g. ECG, Ultrasound, 2D Echo)</summary>
+                        <AdminForm action={addNewTestToPackage} eventId={eventId} back={back} live={live} hidden={{ package_id: p.id }} style={{ marginTop: 10 }}>
+                          <div className="form-row">
+                            <div className="field" style={{ flex: 2 }}><label htmlFor={`nt-${p.id}`}>Test name</label><input id={`nt-${p.id}`} name="test_name" required maxLength={200} placeholder="e.g. 2D Echo" /></div>
+                            <div className="field"><label htmlFor={`nc-${p.id}`}>Category</label><input id={`nc-${p.id}`} name="category" placeholder="e.g. Cardiac, Radiology" /></div>
+                            {ctx.can('addon.price.edit') ? <div className="field"><label htmlFor={`np-${p.id}`}>Price if sold alone (₹, optional)</label><input id={`np-${p.id}`} name="price" inputMode="decimal" /></div> : null}
+                          </div>
+                          <div className="form-row">
+                            <div className="field"><label htmlFor={`nv-${p.id}`}>Done during which visit?</label>
+                              <select id={`nv-${p.id}`} name="service_id" defaultValue=""><option value="">A new visit (named below, or same as the test)</option>
+                                {(services ?? []).filter((v) => v.active).map((v) => <option key={v.id} value={v.id}>{v.name} ({locationLabel(v.location)})</option>)}</select></div>
+                            <div className="field"><label htmlFor={`nn-${p.id}`}>New visit name (optional)</label><input id={`nn-${p.id}`} name="new_service" list="visits-pkg" maxLength={80} placeholder="e.g. Ultrasound (USG)" /></div>
+                          </div>
+                          <label className="check small"><input type="checkbox" name="walk_in" />Done later at the walk-in centre (new visit only)</label>
+                          <p className="small muted" style={{ margin: '6px 0' }}>Then make sure a station does this visit (Stations &amp; counters). One room can do several visits, e.g. Ultrasound and 2D Echo.</p>
+                          <SubmitButton className="btn btn-solid btn-sm">Create test and add to package</SubmitButton>
+                        </AdminForm>
+                      </details>) : null}
                   </details>) : null}
                 {canMap && pg.length ? (
                   <AdminForm action={addPackageTest} eventId={eventId} back={back} live={live} hidden={{ package_id: p.id }} className="row" style={{ marginTop: 10 }}>
@@ -153,15 +205,17 @@ export default async function Packages({ params }: { params: Promise<{ eventId: 
         );
       })}
 
-      <Card title="Workflow services (physical visits)" sub="A service is one queue stop. Map tests to services in the test catalogue. Grouping must be approved by the Lab Partner.">
+      {!sp.pkg ? (
+      <details className="card"><summary className="strong" style={{ cursor: 'pointer' }}>Visits (physical queue stops) — {(services ?? []).length}</summary>
+      <p className="small muted">A visit is one queue stop. Tests are linked to visits in the Test catalogue; stations say which visits they do.</p>
         <div className="table-wrap"><table><thead><tr><th>Code</th><th>Name</th><th>Location</th><th>Priority</th><th>Est. min</th><th>Tests</th><th></th></tr></thead>
           <tbody>{((services ?? []) as Svc[]).map((s) => (
             <tr key={s.id}><td className="mono">{s.code}</td><td className="strong">{s.name}{!s.active ? <span className="badge"> inactive</span> : null}</td><td>{locationLabel(s.location)}</td><td>{s.priority}</td><td>{s.est_minutes ?? '—'}</td>
               <td className="wrap small">{(map ?? []).filter((m) => m.service_id === s.id).map((m) => test(m.test_id)?.display_name).join(', ')}</td>
-              <td>{canMap ? <details><summary className="btn btn-ghost btn-sm">Edit</summary><div style={{ width: 560, whiteSpace: 'normal', padding: '10px 0' }}>
+              <td>{canMap ? <details><summary className="btn btn-ghost btn-sm">Edit</summary><div style={{ width: 'min(560px, 86vw)', whiteSpace: 'normal', padding: '10px 0' }}>
                 <ServiceForm s={s} eventId={eventId} back={back} live={live} /></div></details> : null}</td></tr>))}</tbody></table></div>
-        {canMap ? <div style={{ marginTop: 16 }}><div className="label">New service</div><ServiceForm eventId={eventId} back={back} live={live} /></div> : null}
-      </Card>
+        {canMap ? <div style={{ marginTop: 16 }}><div className="label">New visit</div><ServiceForm eventId={eventId} back={back} live={live} /></div> : null}
+      </details>) : null}
     </>
   );
 }

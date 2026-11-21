@@ -35,3 +35,40 @@ describe('package builder', () => {
     expect(await content(pp)).toEqual([]);
   });
 });
+
+describe('package CSV import', () => {
+  const row = (package_code: string, test: string, extra: Record<string, unknown> = {}) =>
+    ({ package_code, package_name: '', code_letter: '', price_paise: null, description: '', test, ...extra });
+
+  it('creates and updates packages, replaces their test list, matches tests by code or name', async () => {
+    const admin = fx.users.event_admin.client;
+    const res = await must<{ created: number; updated: number }>(admin.rpc('import_packages', { p_event: ev, p_rows: [
+      row('EXEC', 'CBC', { package_name: 'Executive', code_letter: 'X', price_paise: 449900 }), row('EXEC', 'lft'), row('EXEC', 'Lipid'),
+      row('MINI', 'CBC', { package_name: 'Mini check' }),
+    ] }));
+    expect(res).toMatchObject({ created: 2, updated: 0 });
+    const exec = await must<{ id: string; price_paise: number; code_letter: string }>(db().from('packages').select('id, price_paise, code_letter').eq('event_id', ev).eq('code', 'EXEC').single());
+    expect(exec).toMatchObject({ price_paise: 449900, code_letter: 'X' });
+    expect(await content(exec.id)).toEqual(['CBC', 'LFT', 'LIPID']);
+    // re-import: list replaced, price kept when the column is empty
+    await must(admin.rpc('import_packages', { p_event: ev, p_rows: [row('EXEC', 'CBC'), row('EXEC', 'TSH')] }));
+    expect(await content(exec.id)).toEqual(['CBC', 'TSH']);
+    expect((await must<{ price_paise: number }>(db().from('packages').select('price_paise').eq('id', exec.id).single())).price_paise).toBe(449900);
+  });
+
+  it('is all or nothing: one unknown test leaves every package unchanged', async () => {
+    const admin = fx.users.event_admin.client;
+    const exec = (await must<{ id: string }>(db().from('packages').select('id').eq('event_id', ev).eq('code', 'EXEC').single())).id;
+    expect(await rpcError(admin.rpc('import_packages', { p_event: ev, p_rows: [row('EXEC', 'HBA1C'), row('NEWPKG', 'Nope test', { package_name: 'New' })] })))
+      .toMatch(/test "Nope test" is not in the catalogue/);
+    expect(await content(exec)).toEqual(['CBC', 'TSH']);
+    expect(await must<unknown[]>(db().from('packages').select('id').eq('event_id', ev).eq('code', 'NEWPKG'))).toHaveLength(0);
+  });
+
+  it('refuses the Pay per test package, new packages without a name, and Bank of India events', async () => {
+    const admin = fx.users.event_admin.client;
+    expect(await rpcError(admin.rpc('import_packages', { p_event: ev, p_rows: [row('PAY_PER_TEST', 'CBC')] }))).toMatch(/Pay per test/);
+    expect(await rpcError(admin.rpc('import_packages', { p_event: ev, p_rows: [row('NONAME', 'CBC')] }))).toMatch(/needs a package_name/);
+    expect(await rpcError(fx.platform.client.rpc('import_packages', { p_event: fx.eventId, p_rows: [row('EXTRA', 'CBC', { package_name: 'x' })] }))).toMatch(/package_mode/);
+  });
+});

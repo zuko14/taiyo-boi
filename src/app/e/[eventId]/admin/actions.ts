@@ -6,7 +6,7 @@ import { bool, go, intOrNull, safePath, str, strOrNull } from '@/lib/flash';
 import { localInputToIso, toPaise } from '@/lib/format';
 import { createClient, serviceClient } from '@/lib/supabase/server';
 import { VPA_RE } from '@/lib/upi';
-import { mapCatalog, parseCsv } from '@/lib/catalog-import';
+import { codeFromName, mapCatalog, mapPackages, parseCsv } from '@/lib/catalog-import';
 
 async function admin(fd: FormData, defaultReason?: string) {
   const eventId = str(fd, 'event_id');
@@ -165,6 +165,38 @@ export async function setPackageTests(fd: FormData) {
   done(null, `${pkg.name}: ${add.length} added, ${drop.length} removed (applies to new registrations).`);
 }
 
+/** Create a test that is not in the catalogue yet (ECG, Ultrasound, 2D Echo…) and add it to a package. */
+export async function addNewTestToPackage(fd: FormData) {
+  const { eventId, ctx, db, done, back } = await admin(fd, 'Test created for a package');
+  const pkgId = str(fd, 'package_id'); const name = str(fd, 'test_name').slice(0, 200);
+  if (!name) go(back, 'err', 'Enter the test name.');
+  let price: number | null = null;
+  if (str(fd, 'price')) {
+    try { price = toPaise(str(fd, 'price')); } catch (e) { go(back, 'err', (e as Error).message); }
+    if (!ctx.can('addon.price.edit')) go(back, 'err', 'You may not set prices; leave the price empty.');
+  }
+  // the visit: chosen, typed, or (neither) named after the test itself, e.g. "2D Echo"
+  let serviceId = strOrNull(fd, 'service_id');
+  if (!serviceId) {
+    const { data, error } = await db.rpc('ensure_service', { p_event: eventId, p_name: str(fd, 'new_service') || name, p_location: bool(fd, 'walk_in') ? 'walk_in' : 'event_day' });
+    if (error) go(back, 'err', friendlyError(error));
+    serviceId = data as string;
+  }
+  const { data: svc } = await db.from('workflow_services').select('code, location').eq('id', serviceId).eq('event_id', eventId).single();
+  if (!svc) go(back, 'err', 'Visit not found.');
+  // a fresh, unused code, so an existing test is never overwritten
+  const base = codeFromName(name);
+  const { data: taken } = await db.from('test_catalog').select('code').eq('event_id', eventId).like('code', `${base}%`);
+  let code = base; for (let n = 2; (taken ?? []).some((t) => t.code === code); n++) code = `${base.slice(0, 37)}-${n}`;
+  // one transaction: test + visit link + price
+  const { error: impErr } = await db.rpc('import_catalog', { p_event: eventId, p_reason: strOrNull(fd, 'reason'), p_rows: [{ code, name, category: str(fd, 'category'),
+    price_paise: price, location: svc.location, service_code: svc.code, lab_order_code: '', instructions: '' }] });
+  if (impErr) go(back, 'err', friendlyError(impErr));
+  const { data: t } = await db.from('test_catalog').select('id').eq('event_id', eventId).eq('code', code).single();
+  const { error } = await db.from('package_tests').insert({ event_id: eventId, package_id: pkgId, test_id: t!.id });
+  done(error, `${name} created and added to the package${error ? '' : ` (code ${code})`}.`);
+}
+
 export async function savePackageTest(fd: FormData) {
   const { db, done } = await admin(fd);
   const { error } = await db.from('package_tests').update({ priority: intOrNull(fd, 'priority') ?? 100, fasting_required: bool(fd, 'fasting_required'),
@@ -211,10 +243,15 @@ export async function saveStation(fd: FormData) {
   // validate and resolve the services first, so a rejected form never leaves a half-saved station
   const want = new Set(fd.getAll('caps').map(String));
   if (fd.has('caps_present')) {
-    const fresh = str(fd, 'new_service');   // e.g. "X-Ray" or "Blood sample collection", created or reused
-    if (!want.size && !fresh) go(back, 'err', `Choose or type at least one service for ${str(fd, 'name') || 'this station'} — a station without a service can never receive participants.`);
-    if (fresh) {
-      const { data: sid, error } = await db.rpc('ensure_service', { p_event: eventId, p_name: fresh, p_location: kind === 'walkin_centre' ? 'walk_in' : 'event_day' });
+    // typed visits, comma-separated ("Ultrasound (USG), 2D Echo" = one room doing both); created or reused
+    const fresh = str(fd, 'new_service').split(',').map((v) => v.trim()).filter(Boolean);
+    // nothing ticked or typed: the station's own name is its visit (e.g. "Ultrasound USG")
+    if (!want.size && !fresh.length) {
+      if (!str(fd, 'name')) go(back, 'err', 'Give the station a name, or choose what it does.');
+      fresh.push(str(fd, 'name'));
+    }
+    for (const v of fresh) {
+      const { data: sid, error } = await db.rpc('ensure_service', { p_event: eventId, p_name: v, p_location: kind === 'walkin_centre' ? 'walk_in' : 'event_day' });
       if (error) go(back, 'err', friendlyError(error));
       want.add(sid as string);
     }
@@ -315,10 +352,12 @@ export async function deleteTest(fd: FormData) {
 }
 
 export async function createPackage(fd: FormData) {
-  const { eventId, db, done } = await admin(fd, 'Package created');
-  const { error } = await db.rpc('create_package', { p_event: eventId, p_code: str(fd, 'code'), p_name: str(fd, 'name'),
+  const { eventId, db, back } = await admin(fd, 'Package created');
+  const { data: id, error } = await db.rpc('create_package', { p_event: eventId, p_code: str(fd, 'code'), p_name: str(fd, 'name'),
     p_code_letter: str(fd, 'code_letter'), p_description: str(fd, 'description') });
-  done(error, 'Package created. Add its tests below.');
+  if (error) go(back, 'err', friendlyError(error));
+  revalidatePath(back.split('?')[0]);
+  go(`${back.split('?')[0]}?pkg=${id}`, 'ok', 'Package created. Now choose its tests.');      // straight into the new package
 }
 
 export async function deletePackage(fd: FormData) {
@@ -385,4 +424,17 @@ export async function deleteStation(fd: FormData) {
   const { db, done } = await admin(fd, 'Station deleted');
   const { error } = await db.rpc('delete_station', { p_station: str(fd, 'id'), p_reason: strOrNull(fd, 'reason') });
   done(error, 'Station deleted');
+}
+
+export async function importPackages(fd: FormData) {
+  const { eventId, db, done, back } = await admin(fd, 'Package CSV import');
+  const csv = str(fd, 'csv');
+  if (!csv) go(back, 'err', 'Choose a CSV file first.');
+  if (csv.length > 2_000_000) go(back, 'err', 'File is larger than 2 MB.');
+  const { rows, errors } = mapPackages(parseCsv(csv));       // never trust the browser preview
+  if (errors.length) go(back, 'err', `Line ${errors[0].line}: ${errors[0].message}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`);
+  const { data, error } = await db.rpc('import_packages', { p_event: eventId, p_rows: rows.map((r) => ({ ...r, line: undefined })), p_reason: strOrNull(fd, 'reason') });
+  if (error) go(back, 'err', friendlyError(error));
+  const d = data as { created: number; updated: number; tests: number };
+  done(null, `Packages imported: ${d.created} new, ${d.updated} updated, ${d.tests} test line(s).`);
 }

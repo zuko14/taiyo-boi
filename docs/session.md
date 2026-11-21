@@ -470,6 +470,36 @@ This session implemented **two major operational upgrades**:
 - **Registration Screen UI:**
   - Package selection cards on the registration desk now list all included tests under each package.
 
+---
+
+# Engineering Session Log — 2026-11-22
+
+**Repository:** `boi-taiyo` (`https://github.com/zuko14/taiyo-boi`)  
+**Base Commit:** `1ddf7f0`  
+**Session Status:** Verified locally (**17 unit tests passing**, full typecheck, and Next.js production build passing). Migrations `20261122000020` and `20261122000021` applied to hosted Supabase (`sgnflkglfkoqvfzjbrnr`); committed and pushed to `origin/main` for Render deployment.
+
+---
+
+## Executive Summary
+
+This session implemented **three major operational enhancements**:
+
+1. **Imaging Tests in Packages & Multi-Visit Rooms** — Non-lab tests (ECG, Ultrasound/USG, 2D Echo, X-Ray) can be created directly on-the-fly inside the Package Builder (`import_catalog`). Stations now support comma-separated visit lists ("Ultrasound (USG), 2D Echo") so a single physical room can serve multiple sequential visit queues.
+2. **Package CSV Import & Compact Admin Navigation (`20261122000020_import_packages.sql`)** —
+   - Added atomic bulk CSV package import (`import_packages`) with template download and round-trip export (`/admin/packages/template[?current=1]`).
+   - Redesigned the Packages page into a compact, searchable overview list with single-package drill-down (`?pkg=`).
+   - Added paginated filtering (50/page) to the Test Catalogue with category, search, and "unlinked to visit" status filters.
+3. **Automated Duty Roles on Shift Assignment (`20261122000021_duty_roles.sql`)** —
+   - Shift assignment now automatically grants or reactivates the matching functional job role (`_grant_duty_roles`, audited as `staff.role_auto`):
+     - `SAMPLE` visit → Phlebotomist
+     - Radiology visits (`X-Ray`, `USG`, `Ultrasound`, `Echo`, `Mammography`) → Radiology Technician
+     - Other diagnostic stations → Station Technician
+     - Registration Counter → Registration Desk (+ Cashier role on patient-paid camps)
+     - Add-on Desk → Add-on Staff
+     - Walk-in Centre → Walk-in Staff
+   - Added live "On shift now" indicators and quick "Add staff" shortcuts directly on the Stations management screen.
+
+
 
 
 

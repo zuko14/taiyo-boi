@@ -91,3 +91,47 @@ export function mapCatalog(rows: string[][]): { rows: ImportRow[]; errors: { lin
   if (!out.length && !errors.length) errors.push({ line: h + 1, message: 'The file has a header but no test rows.' });
   return { rows: out, errors };
 }
+
+// ---------------------------------------------------------------- packages
+export interface PackageRow { line: number; package_code: string; package_name: string; code_letter: string; price_paise: number | null; description: string; test: string }
+export const PACKAGE_TEMPLATE_COLUMNS = ['package_code', 'package_name', 'code_letter', 'price_inr', 'description', 'test'] as const;
+const PALIAS: Record<string, (typeof PACKAGE_TEMPLATE_COLUMNS)[number]> = {
+  package_code: 'package_code', package: 'package_code', code: 'package_code',
+  package_name: 'package_name', name: 'package_name',
+  code_letter: 'code_letter', letter: 'code_letter',
+  price_inr: 'price_inr', price: 'price_inr', offer_price: 'price_inr', package_price: 'price_inr',
+  description: 'description',
+  test: 'test', tests: 'test', test_code: 'test', test_codes: 'test', test_name: 'test',
+};
+
+/** One row per package test; a test cell may list several, separated by ; or |. */
+export function mapPackages(rows: string[][]): { rows: PackageRow[]; errors: { line: number; message: string }[] } {
+  const errors: { line: number; message: string }[] = [];
+  const h = rows.findIndex((r) => r.some((c) => PALIAS[key(c)] === 'package_code'));
+  if (h < 0) return { rows: [], errors: [{ line: 1, message: 'No header row found. Use the template: package_code, package_name, code_letter, price_inr, description, test.' }] };
+  const col = new Map<string, number>();
+  rows[h].forEach((c, i) => { const k = PALIAS[key(c)]; if (k && !col.has(k)) col.set(k, i); });
+  if (!col.has('test')) return { rows: [], errors: [{ line: h + 1, message: 'Missing the "test" column.' }] };
+  const get = (r: string[], k: string) => (col.has(k) ? clean(r[col.get(k)!]) : '');
+  const out: PackageRow[] = []; const prices = new Map<string, number | null>();
+  rows.slice(h + 1).forEach((r, i) => {
+    const line = h + i + 2;
+    const code = get(r, 'package_code').toUpperCase().replace(/[\s-]+/g, '_');
+    if (!code && !get(r, 'test')) return;                    // blank line
+    if (!/^[A-Z0-9_]{1,30}$/.test(code)) { errors.push({ line, message: `Package code "${get(r, 'package_code')}" must be letters, digits or _ (max 30)` }); return; }
+    const letter = get(r, 'code_letter').toUpperCase();
+    if (letter && !/^[A-Z]{1,3}$/.test(letter)) { errors.push({ line, message: `Code letter "${letter}" must be 1–3 letters` }); return; }
+    const price = priceToPaise(get(r, 'price_inr'));
+    if (price === 'invalid') { errors.push({ line, message: `Price "${get(r, 'price_inr')}" is not a number` }); return; }
+    if (price != null) {
+      if (prices.has(code) && prices.get(code) !== price) { errors.push({ line, message: `Package ${code} has a different price on another row` }); return; }
+      prices.set(code, price);
+    }
+    const tests = get(r, 'test').split(/[;|]/).map((t) => t.trim()).filter(Boolean);
+    const base = { line, package_code: code, package_name: get(r, 'package_name').slice(0, 120), code_letter: letter, price_paise: price, description: get(r, 'description').slice(0, 300) };
+    if (!tests.length) { out.push({ ...base, test: '' }); return; }
+    for (const t of tests) out.push({ ...base, test: t.slice(0, 200) });
+  });
+  if (!out.length && !errors.length) errors.push({ line: h + 1, message: 'The file has a header but no rows.' });
+  return { rows: out, errors };
+}
