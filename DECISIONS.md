@@ -138,6 +138,12 @@ Dated 10 Nov 2026 unless noted. “Provisional” means configurable and awaitin
 - `merge_service` folds a duplicate visit into another: tests move, the target gains the duplicate's stations, the duplicate is deactivated (kept so already-registered patients can still be served). Stations page → Visits lists each visit's tests and stations, flags visits that block the event, and offers Merge.
 - `station_link_tests`: a station can pick its exact tests (custom combined room). Tests keep their own visit (separate stops) unless "one queue stop" is chosen, which moves them to the room's own visit `ROOM-<station code>`; tests with no visit always go there. Location mismatches (walk-in vs event day) are refused.
 
+## 2026-11-22 — adding more stations of the same kind
+
+- "+ Another like this" on every station copies it (same kind, visits, capacity, settings) with a numbered name and a free code (BS → BS-2). Staff are not copied; assign them with Add staff.
+- Station code is optional when creating: generated from the name and made unique.
+- The walk-in centre form explains it is for a separate later-visit centre and points to Diagnostic stations for camp stations (a second blood station was being created as a walk-in centre, which correctly offers only walk-in visits).
+
 ## Open approvals (CLAUDE.md §20 highest priority)
 
 1. Lab Partner approval of catalogue, order codes, and test→visit grouping.

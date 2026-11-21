@@ -506,6 +506,12 @@ This session implemented **three major operational enhancements**:
    - **Custom Combined Rooms (`station_link_tests`):** Allows a station to pick its exact test list, with options for separate queue stops or a unified single queue stop (`ROOM-<station code>`).
    - **Stations → Visits UI:** Lists tests and stations per visit, flags unserved visits blocking go-live, and provides one-click Merge.
 
+5. **Station Cloning & Quick Scaling:**
+   - Added **"+ Another like this"** (`cloneStation`) action to every station card: clones the station with identical kind, visits/capabilities, capacity, and settings with an auto-incremented name/code (e.g. `BS` → `BS-2`). Staff shifts are left for manual assignment via "Add staff".
+   - Station codes are now optional when manually creating a station (auto-derived from the name and made unique).
+   - Added clear explanatory guidance on the Walk-in Centre creation form clarifying it is exclusively for separate later-visit centers (preventing accidental creation of event-day stations under the walk-in category).
+
+
 
 
 

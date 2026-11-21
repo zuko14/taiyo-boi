@@ -261,7 +261,7 @@ export async function saveStation(fd: FormData) {
     capacity: intOrNull(fd, 'capacity') ?? 1, avg_service_minutes: intOrNull(fd, 'avg_service_minutes'), max_queue: intOrNull(fd, 'max_queue'),
     accepts_assignments: bool(fd, 'accepts_assignments') };
   const res = id ? await db.from('stations').update(row).eq('id', id).select('id').single()
-    : await db.from('stations').insert({ ...row, event_id: eventId, code: str(fd, 'code').toUpperCase(), kind }).select('id').single();
+    : await db.from('stations').insert({ ...row, event_id: eventId, code: await freeStationCode(db, eventId, str(fd, 'code') || row.name), kind }).select('id').single();
   if (res.error) go(back, 'err', friendlyError(res.error));
   if (fd.has('caps_present')) {
     // tests picked for this station (custom combined rooms): link them, and the station does their visits
@@ -451,4 +451,33 @@ export async function mergeVisit(fd: FormData) {
   const { data, error } = await db.rpc('merge_service', { p_from: str(fd, 'from'), p_into: str(fd, 'into'), p_reason: strOrNull(fd, 'reason') });
   const d = data as { tests: number; stations_added: number } | null;
   done(error, `Merged: ${d?.tests ?? 0} test(s) moved, ${d?.stations_added ?? 0} station link(s) added.`);
+}
+
+/** A station code that is free in this event: typed code as-is, else derived from the name (BLOOD-COLLECTION-2…). */
+async function freeStationCode(db: Awaited<ReturnType<typeof createClient>>, eventId: string, wanted: string) {
+  const base = wanted.toUpperCase().replace(/[^A-Z0-9_-]+/g, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '').slice(0, 17).replace(/-+$/, '') || 'ST';
+  const { data } = await db.from('stations').select('code').eq('event_id', eventId).like('code', `${base}%`);
+  const taken = new Set((data ?? []).map((r) => r.code));
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) { const c = `${base.replace(/-?\d+$/, '')}-${n}`.slice(0, 20); if (!taken.has(c)) return c; }
+}
+
+/** "Add another like this": a new station of the same kind doing the same visits (e.g. a second blood station). */
+export async function duplicateStation(fd: FormData) {
+  const { eventId, db, done, back } = await admin(fd, 'Station copied');
+  const { data: s } = await db.from('stations').select('*').eq('id', str(fd, 'id')).eq('event_id', eventId).single();
+  if (!s) go(back, 'err', 'Station not found.');
+  const { data: names } = await db.from('stations').select('name').eq('event_id', eventId);
+  const stem = s.name.replace(/\s*[-#]?\s*\d+$/, '').trim() || s.name;
+  let n = 2; while ((names ?? []).some((x) => x.name.toLowerCase() === `${stem} ${n}`.toLowerCase())) n++;
+  const { data: copy, error } = await db.from('stations').insert({ event_id: eventId, code: await freeStationCode(db, eventId, s.code), name: `${stem} ${n}`, kind: s.kind,
+    location: s.location, instructions: s.instructions, address: s.address, operating_hours: s.operating_hours, valid_from: s.valid_from, valid_to: s.valid_to,
+    capacity: s.capacity, avg_service_minutes: s.avg_service_minutes, max_queue: s.max_queue, accepts_assignments: s.accepts_assignments }).select('id, name').single();
+  if (error) go(back, 'err', friendlyError(error));
+  const { data: caps } = await db.from('station_capabilities').select('service_id').eq('station_id', s.id);
+  if (caps?.length) {
+    const { error: capErr } = await db.from('station_capabilities').insert(caps.map((c) => ({ event_id: eventId, station_id: copy!.id, service_id: c.service_id })));
+    if (capErr) go(back, 'err', friendlyError(capErr));
+  }
+  done(null, `${copy!.name} added — same visits as ${s.name}. Assign staff to it with Add staff.`);
 }

@@ -2,7 +2,7 @@ import { AdminForm, isLive } from '@/components/AdminForm';
 import { SubmitButton } from '@/components/SubmitButton';
 import { Card, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
-import { deleteStation, mergeVisit, saveStation } from '../actions';
+import { deleteStation, duplicateStation, mergeVisit, saveStation } from '../actions';
 import { PackageTestPicker } from '@/components/PackageTestPicker';
 import { RpcForm } from '@/components/RpcForm';
 import { nowMs } from '@/lib/clock';
@@ -46,7 +46,7 @@ export default async function Stations({ params }: { params: Promise<{ eventId: 
     return (
       <AdminForm action={saveStation} eventId={eventId} back={back} live={live} hidden={{ id: s?.id, kind: s ? undefined : k }}>
         <div className="form-row">
-          {!s ? <div className="field"><label>Code</label><input name="code" required pattern="[A-Za-z0-9_\-]{1,20}" /></div> : null}
+          {!s ? <div className="field"><label>Code (optional)</label><input name="code" pattern="[A-Za-z0-9_\-]{1,20}" placeholder="auto from name" /></div> : null}
           <div className="field"><label>Name</label><input name="name" defaultValue={s?.name} required /></div>
           <div className="field"><label>Location / room</label><input name="location" defaultValue={s?.location} /></div>
           {k === 'station' ? <>
@@ -63,6 +63,7 @@ export default async function Stations({ params }: { params: Promise<{ eventId: 
             <div className="field"><label>Valid to</label><input type="date" name="valid_to" defaultValue={s?.valid_to ?? ''} /></div>
           </div>) : null}
         <div className="field"><label>Instructions shown to participants</label><input name="instructions" defaultValue={s?.instructions} /></div>
+        {k === 'walkin_centre' && !s ? <div className="alert alert-info small" style={{ marginBottom: 10 }}><span>A <strong>walk-in centre</strong> is a separate place patients visit later (e.g. the lab&apos;s USG centre). For another station at the camp — like a second blood collection station — use <strong>Diagnostic stations → Add another like this</strong> or <strong>Add diagnostic station</strong> above.</span></div> : null}
         {['station', 'walkin_centre'].includes(k) ? (
           <div style={{ marginBottom: 10 }}>{ctx.can('station.mapping.edit') ? <input type="hidden" name="caps_present" value="1" /> : null}
             <div className="label">What does this {k === 'station' ? 'station' : 'centre'} do? (required)</div>
@@ -113,11 +114,16 @@ export default async function Stations({ params }: { params: Promise<{ eventId: 
                           <SubmitButton className="btn btn-solid btn-sm">Assign</SubmitButton>
                         </RpcForm>
                       </details>) : null}</td>
-                  <td><details><summary className="btn btn-ghost btn-sm">Edit</summary><div style={{ width: 'min(720px, 86vw)', whiteSpace: 'normal', padding: '10px 0' }}>{form(s)}
+                  <td><div className="row" style={{ gap: 6, flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+                    {ctx.can('station.configure') ? (
+                      <AdminForm action={duplicateStation} eventId={eventId} back={back} live={false} hidden={{ id: s.id }}>
+                        <SubmitButton className="btn btn-ghost btn-sm" aria-label={`Add another station like ${s.name}`}>+ Another like this</SubmitButton>
+                      </AdminForm>) : null}
+                    <details><summary className="btn btn-ghost btn-sm">Edit</summary><div style={{ width: 'min(720px, 86vw)', whiteSpace: 'normal', padding: '10px 0' }}>{form(s)}
                     {ctx.can('station.configure') ? (
                       <AdminForm action={deleteStation} eventId={eventId} back={back} live={live} hidden={{ id: s.id }} style={{ marginTop: 10 }}>
                         <SubmitButton className="btn btn-red btn-sm" confirm={`Delete ${s.name}? Only possible if it never handled a participant; otherwise close it in Queue control.`}>Delete station</SubmitButton>
-                      </AdminForm>) : null}</div></details></td></tr>))}</tbody></table></div>
+                      </AdminForm>) : null}</div></details></div></td></tr>))}</tbody></table></div>
             {ctx.can('station.configure') ? <details style={{ marginTop: 12 }}><summary className="btn btn-ghost btn-sm">Add {label.toLowerCase().replace(/s$/, '')}</summary><div style={{ marginTop: 10 }}>{form(undefined, kind)}</div></details> : null}
           </Card>
         );
