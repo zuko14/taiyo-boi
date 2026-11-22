@@ -18,6 +18,7 @@ export async function addTestsForPatient(fd: FormData) {
     p_reg: reg, p_desk: str(fd, 'counter'), p_test_ids: tests, p_idempotency_key: str(fd, 'idem'), p_consent: bool(fd, 'consent'),
     p_discounts: Object.keys(discounts).length ? discounts : null, p_discount_reason: strOrNull(fd, 'discount_reason'),
     p_consultation: strOrNull(fd, 'consultation_id'),
+    p_referred_doctor: strOrNull(fd, 'referred_doctor'), p_referred_name: strOrNull(fd, 'referred_name'),
   }));
   // the tag screen shows the payment due and the next station, as after a first registration
   redirect(`/e/${eventId}/participants/${reg}/tag?ok=${encodeURIComponent(`${tests.length} test(s) added`)}`);

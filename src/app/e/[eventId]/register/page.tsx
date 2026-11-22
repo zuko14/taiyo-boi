@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { DutyPicker } from '@/components/DutyPicker';
 import { Icon } from '@/components/Icons';
 import { ScanBox } from '@/components/ScanBox';
+import { ReferralFields } from '@/components/Referral';
 import { SubmitButton } from '@/components/SubmitButton';
 import { Card, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
@@ -126,6 +127,7 @@ export default async function RegisterPage({ params, searchParams }: { params: P
                   <select id="doctor_id" name="doctor_id" defaultValue=""><option value="">No consultation</option>
                     {docs.map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialization ? ` — ${d.specialization}` : ''}{d.notes ? ` (${d.notes})` : ''}</option>)}</select>
                   <span className="help">Books a free consultation (no queue). Tests the doctor advises are added later from “Existing patient”, linked to this consultation.</span></div>) : null}
+              <ReferralFields doctors={docs} help="If a doctor sent the patient for these tests." />
               <label className="check"><input type="checkbox" name="consent" required={requireConsent} data-required={requireConsent ? '1' : '0'} />
                 <span className="small">Participant has read the privacy notice and consents to registration{requireConsent ? ' (required)' : ''}{custom ? ', and confirms the selected tests and price' : ''}.</span></label>
               <div style={{ marginTop: 14 }}><SubmitButton className="btn btn-accent btn-lg btn-block">Register patient</SubmitButton></div>

@@ -19,8 +19,11 @@ export default async function TagPage({ params }: { params: Promise<{ eventId: s
   if (!reg) notFound();
   const p = reg.participants as unknown as { full_name: string; age: number | null };
   // registration staff can read orders (participant.view), not payments; the package order holds the price snapshot
-  const { data: dueOrders } = await ctx.supabase.from('orders').select('id, kind, total_paise, list_total_paise, discount_pct, discount_reason, order_items(test_name, discount_pct)').eq('registration_id', regId).eq('status', 'active').gt('total_paise', 0).order('created_at');
+  const { data: dueOrders } = await ctx.supabase.from('orders').select('id, kind, total_paise, list_total_paise, discount_pct, discount_reason, referred_by_doctor_id, referred_by_name, order_items(test_name, discount_pct)').eq('registration_id', regId).eq('status', 'active').gt('total_paise', 0).order('created_at');
   const due = (dueOrders ?? []).reduce((n, o) => n + o.total_paise, 0);
+  const refIds = [...new Set((dueOrders ?? []).map((o) => o.referred_by_doctor_id).filter(Boolean))] as string[];
+  const { data: refDocs } = refIds.length ? await ctx.supabase.from('doctors').select('id, name').in('id', refIds) : { data: [] as { id: string; name: string }[] };
+  const refName = (o: { referred_by_doctor_id: string | null; referred_by_name: string | null }) => (refDocs ?? []).find((d) => d.id === o.referred_by_doctor_id)?.name ?? o.referred_by_name;
   const [{ data: intents }, { data: tasks }, { data: active }] = await Promise.all([
     ctx.can('payment.view') ? ctx.supabase.from('payment_intents').select('id, order_id, status, amount_paise, created_by, receipts(receipt_no)').eq('registration_id', regId)
       : Promise.resolve({ data: null }),
@@ -77,7 +80,7 @@ export default async function TagPage({ params }: { params: Promise<{ eventId: s
           sub={unpaid ? 'Ask the patient to scan the QR with any UPI app (or take cash), then confirm it below once the money is received.' : 'Payment confirmed — the tests are in the queue.'}>
           {(dueOrders ?? []).map((o) => { const i = intentOf(o.id); const paid = i ? ['paid', 'waived'].includes(i.status) : !unpaid; return (
             <div key={o.id} style={{ marginTop: 10 }}>
-              <div className="row-between"><span className="strong small">{o.kind === 'package' ? `Package · ${(reg.packages as unknown as { name: string }).name}` : `Tests · ${(o.order_items as { test_name: string }[]).map((x) => x.test_name).join(', ')}`} · {inr(o.total_paise)}{o.list_total_paise != null ? <span className="small muted"> (was {inr(o.list_total_paise)} — discount: {o.discount_reason})</span> : null}</span>
+              <div className="row-between"><span className="strong small">{o.kind === 'package' ? `Package · ${(reg.packages as unknown as { name: string }).name}` : `Tests · ${(o.order_items as { test_name: string }[]).map((x) => x.test_name).join(', ')}`} · {inr(o.total_paise)}{o.list_total_paise != null ? <span className="small muted"> (was {inr(o.list_total_paise)} — discount: {o.discount_reason})</span> : null}{refName(o) ? <span className="small muted"> · referred by {refName(o)}</span> : null}</span>
                 {paid ? <span className="badge green">Paid{i?.receipts?.receipt_no ? ` · ${i.receipts.receipt_no}` : ''}</span> : <span className="badge amber">Pending</span>}</div>
               {!paid ? <UpiPay settings={ctx.event.settings} amountPaise={o.total_paise} reference={reg.registration_code} /> : null}
               {!paid && i && ctx.can('payment.verify') && ['pending', 'requires_review'].includes(i.status) ? (

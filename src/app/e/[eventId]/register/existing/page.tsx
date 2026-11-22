@@ -4,6 +4,7 @@ import { DutyPicker } from '@/components/DutyPicker';
 import { ReasonAction, RpcForm } from '@/components/RpcForm';
 import { ScanBox } from '@/components/ScanBox';
 import { ScanMatches } from '@/components/ScanMatches';
+import { ReferralFields } from '@/components/Referral';
 import { SubmitButton } from '@/components/SubmitButton';
 import { TestPicker } from '@/components/TestPicker';
 import { Card, Empty, PageHead, StatusBadge } from '@/components/ui';
@@ -18,6 +19,7 @@ import { addTestsForPatient } from './actions';
 type SP = Promise<{ at?: string; reg?: string; scan?: string }>;
 type Consult = { id: string; status: string; note: string; booked_at: string; completed_at: string | null; cancelled_reason: string | null; doctors: { name: string; specialization: string } };
 type Order = { id: string; kind: string; status: string; total_paise: number; created_at: string; consultation_id: string | null; discount_reason: string | null;
+  referred_by_doctor_id: string | null; referred_by_name: string | null;
   order_items: { test_name: string; status: string; discount_pct: number }[] };
 
 /** Registration desk, existing patient: never a second registration. Book a doctor consultation or add the tests the doctor advised. */
@@ -36,12 +38,13 @@ export default async function ExistingPatient({ params, searchParams }: { params
   let body = null;
   if (counter && regId) {
     const [{ data: reg }, { data: consults }, { data: orders }, { data: doctors }, pickTests] = await Promise.all([
-      ctx.supabase.from('registrations').select('id, registration_code, classification, status, created_at, package_id, participants(full_name, age, mobile), packages(name)').eq('id', regId).eq('event_id', eventId).maybeSingle(),
+      ctx.supabase.from('registrations').select('id, registration_code, classification, status, created_at, package_id, referred_by_doctor_id, referred_by_name, participants(full_name, age, mobile), packages(name)').eq('id', regId).eq('event_id', eventId).maybeSingle(),
       ctx.supabase.from('consultations').select('id, status, note, booked_at, completed_at, cancelled_reason, doctors(name, specialization)').eq('registration_id', regId).order('booked_at'),
-      ctx.supabase.from('orders').select('id, kind, status, total_paise, created_at, consultation_id, discount_reason, order_items(test_name, status, discount_pct)').eq('registration_id', regId).order('created_at'),
-      ctx.supabase.from('doctors').select('id, name, specialization, notes').eq('event_id', eventId).eq('active', true).order('name'),
+      ctx.supabase.from('orders').select('id, kind, status, total_paise, created_at, consultation_id, discount_reason, referred_by_doctor_id, referred_by_name, order_items(test_name, status, discount_pct)').eq('registration_id', regId).order('created_at'),
+      ctx.supabase.from('doctors').select('id, name, specialization, notes, active').eq('event_id', eventId).order('name'),
       loadPickTests(ctx),
     ]);
+    const active = (doctors ?? []).filter((d) => d.active);
     if (!reg) body = <div className="alert alert-err">Registration not found in this event.</div>;
     else {
       const p = reg.participants as unknown as { full_name: string; age: number | null; mobile: string | null };
@@ -53,17 +56,20 @@ export default async function ExistingPatient({ params, searchParams }: { params
       const pkgOfThis = (await ctx.supabase.from('package_tests').select('test_id').eq('package_id', reg.package_id)).data ?? [];
       const have = [...new Set([...(own ?? []).map((x) => x.test_id as string), ...pkgOfThis.map((x) => x.test_id as string)])];
       const open = cs.filter((c) => c.status !== 'cancelled');
+      const docOf = (id: string | null) => (doctors ?? []).find((d) => d.id === id)?.name;
+      const referral = (x: { referred_by_doctor_id: string | null; referred_by_name: string | null }) => docOf(x.referred_by_doctor_id) ?? x.referred_by_name;
+      const regRef = referral(reg as unknown as { referred_by_doctor_id: string | null; referred_by_name: string | null });
       const firstConsult = open[0]?.booked_at;
       const items = (o: Order) => o.order_items.filter((i) => i.status === 'active').map((i) => `${i.test_name}${Number(i.discount_pct) > 0 ? ` (${Number(i.discount_pct)}% off)` : ''}`).join(', ');
       // journey: registration, consultations and orders in time order, each order marked before/after consultation
       type Ev = { at: string; key: string; node: ReactNode };
       const evs: Ev[] = [
-        { at: reg.created_at, key: 'reg', node: <><span className="strong">Registered</span> · {(reg.packages as unknown as { name: string }).name}</> },
+        { at: reg.created_at, key: 'reg', node: <><span className="strong">Registered</span> · {(reg.packages as unknown as { name: string }).name}{regRef ? <>{' '}<span className="badge plain">referred by {regRef}</span></> : null}</> },
         ...cs.map((c) => ({ at: c.booked_at, key: c.id, node: <><span className="strong">Doctor consultation</span> · {c.doctors.name}{c.doctors.specialization ? ` — ${c.doctors.specialization}` : ''} <StatusBadge status={c.status === 'booked' ? 'pending' : c.status} label={c.status === 'booked' ? 'Waiting' : c.status === 'completed' ? 'Done' : 'Cancelled'} />{c.note ? <span className="small muted"> · {c.note}</span> : null}</> })),
         ...os.filter((o) => o.order_items.some((i) => i.status === 'active') && o.status === 'active').map((o) => ({ at: o.created_at, key: o.id, node: <>
           <span className="strong">{o.kind === 'package' ? 'Package tests' : 'Tests'}</span>{' '}{o.consultation_id ? <span className="badge green">after consultation · {docName(o.consultation_id)}</span>
             : firstConsult && o.created_at < firstConsult ? <span className="badge plain">before consultation</span> : null}
-          <div className="small text2">{items(o)}{o.total_paise ? ` · ${inr(o.total_paise)}` : ''}{o.discount_reason ? ` · discount: ${o.discount_reason}` : ''}</div></> })),
+          <div className="small text2">{items(o)}{o.total_paise ? ` · ${inr(o.total_paise)}` : ''}{o.discount_reason ? ` · discount: ${o.discount_reason}` : ''}{referral(o) ? ` · referred by ${referral(o)}` : ''}</div></> })),
       ].sort((a, b) => a.at.localeCompare(b.at));
 
       body = (<>
@@ -86,11 +92,11 @@ export default async function ExistingPatient({ params, searchParams }: { params
                   <ReasonAction eventId={eventId} rpc="set_consultation_status" back={here} hidden={{ p_consultation: c.id, p_status: 'cancelled' }} label="Cancel" ok="Consultation cancelled" />
                 </div> : null}
               </li>))}</ul> : <p className="small muted">No consultation yet.</p>}
-            {(doctors ?? []).length ? (
+            {active.length ? (
               <RpcForm eventId={eventId} rpc="book_consultation" back={here} ok="Consultation booked — send the patient to the doctor" hidden={{ p_reg: regId, p_counter: counter }} style={{ marginTop: 12 }}>
                 <div className="form-row">
                   <div className="field"><label htmlFor="bk-doc">Book with</label><select id="bk-doc" name="p_doctor" required>
-                    {(doctors ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialization ? ` — ${d.specialization}` : ''}{d.notes ? ` (${d.notes})` : ''}</option>)}</select></div>
+                    {active.map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialization ? ` — ${d.specialization}` : ''}{d.notes ? ` (${d.notes})` : ''}</option>)}</select></div>
                   <div className="field"><label htmlFor="bk-note">Note (optional)</label><input id="bk-note" name="p_note" maxLength={300} placeholder="e.g. follow-up after blood report" /></div>
                 </div>
                 <SubmitButton>Book free consultation</SubmitButton>
@@ -105,6 +111,7 @@ export default async function ExistingPatient({ params, searchParams }: { params
                   <option value="">Not from a doctor consultation</option>
                   {open.map((c) => <option key={c.id} value={c.id}>{c.doctors.name} — consultation {dt(c.booked_at, tz)}</option>)}</select>
                 <span className="help">Links these tests to the consultation, so you can see what each doctor&apos;s patients took afterwards.</span></div>
+              <ReferralFields doctors={active} help="Leave empty if advised in the consultation chosen above — that doctor is recorded automatically." />
               <TestPicker tests={pickTests} packageTests={{ '': have }} canDiscount={ctx.can('registration.discount')} />
               <label className="check"><input type="checkbox" name="consent" required data-required="1" /><span className="small">Patient confirms the tests and price.</span></label>
               <div style={{ marginTop: 12 }}><SubmitButton className="btn btn-accent btn-block">Add tests</SubmitButton></div>

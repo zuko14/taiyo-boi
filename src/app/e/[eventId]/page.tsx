@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ReferralTable, type ReferralRow } from '@/components/Referral';
 import { redirect } from 'next/navigation';
 import { LiveRefresh } from '@/components/LiveRefresh';
 import { Card, PageHead, Stat, StatusBadge } from '@/components/ui';
@@ -40,6 +41,12 @@ export default async function Dashboard({ params }: { params: Promise<{ eventId:
   const ed = { done: sumTasks('event_day', ['completed']), open: sumTasks('event_day', ['not_ready', 'waiting_unassigned', 'queued', 'called', 'in_service']), exc: sumTasks('event_day', ['exception', 'no_show']) };
   const wi = { done: sumTasks('walk_in', ['completed']), open: sumTasks('walk_in', ['not_attended', 'awaiting_choice', 'checked_in', 'in_service']) };
   const diag = o.stations.filter((s) => s.kind === 'station');
+  // doctors: consultations and referrals (only when the camp has doctors)
+  const [{ data: docStats }, { data: refRows }] = await Promise.all([
+    ctx.supabase.rpc('doctor_insights', { p_event: eventId }), ctx.supabase.rpc('referral_insights', { p_event: eventId })]);
+  const ds = (docStats ?? []) as { name: string; booked: number; completed: number; patients: number; patients_with_tests: number }[];
+  const refs = (refRows ?? []) as ReferralRow[];
+  const showMoney = ctx.can('finance.view');
 
   return (
     <>
@@ -75,6 +82,18 @@ export default async function Dashboard({ params }: { params: Promise<{ eventId:
           ))}</tbody>
         </table></div>
       </Card>
+
+      {ds.length ? (
+        <Card title="Doctors and referrals" sub="Free consultations, and patients/tests each doctor sent for testing"
+          actions={ctx.can('doctor.manage') ? <Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/admin/doctors`}>Doctors</Link> : <Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/participants?doc=consulted`}>Patients</Link>}>
+          <div className="stats" style={{ marginBottom: 12 }}>
+            <Stat label="Waiting for a doctor" value={ds.reduce((n, d) => n + d.booked, 0)} />
+            <Stat label="Consultations done" value={ds.reduce((n, d) => n + d.completed, 0)} />
+            <Stat label="Patients consulted" value={ds.reduce((n, d) => n + d.patients, 0)} hint={`${ds.reduce((n, d) => n + d.patients_with_tests, 0)} took tests after`} />
+            <Stat label="Patients referred" value={refs.filter((r) => r.kind !== 'none').reduce((n, r) => n + r.patients, 0)} hint={showMoney ? `${inr(refs.filter((r) => r.kind !== 'none').reduce((n, r) => n + r.collected_paise, 0))} collected` : undefined} />
+          </div>
+          <ReferralTable rows={refs} money={showMoney} />
+        </Card>) : null}
 
       <div className="grid grid-2">
         <Card title="Registrations by counter">

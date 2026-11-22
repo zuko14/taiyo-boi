@@ -42,6 +42,7 @@ export default async function ParticipantDetail({ params }: { params: Promise<{ 
     ctx.supabase.from('consultations').select('id, status, booked_at, completed_at, doctors(name, specialization)').eq('registration_id', regId).order('booked_at'),
     ctx.supabase.from('orders').select('consultation_id, order_items(test_name, status)').eq('registration_id', regId).eq('status', 'active').not('consultation_id', 'is', null),
   ]);
+  const referredBy = reg.referred_by_doctor_id ? (await ctx.supabase.from('doctors').select('name').eq('id', reg.referred_by_doctor_id).maybeSingle()).data?.name : reg.referred_by_name;
   const consultations = (consultRows ?? []) as unknown as { id: string; status: string; booked_at: string; completed_at: string | null; doctors: { name: string; specialization: string } }[];
   const linked = (cid: string) => ((consultOrders ?? []) as unknown as { consultation_id: string; order_items: { test_name: string; status: string }[] }[])
     .filter((o) => o.consultation_id === cid).flatMap((o) => o.order_items.filter((i) => i.status === 'active').map((i) => i.test_name)).join(', ');
@@ -119,6 +120,7 @@ export default async function ParticipantDetail({ params }: { params: Promise<{ 
         {ctx.can('addon.create') ? <Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/addons?reg=${regId}`}><Icon name="plus" />Add-ons</Link> : null}
       </PageHead>
       {reg.classification_override_reason ? <div className="alert alert-warn">Package override: {reg.classification_override_reason}</div> : null}
+      {referredBy ? <div className="alert alert-info"><span>Referred by <strong>{referredBy}</strong></span></div> : null}
 
       <section className="glass next-step">
         <div className="eyebrow">Current step</div>

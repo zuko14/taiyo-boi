@@ -1,4 +1,5 @@
 import { AdminForm, isLive } from '@/components/AdminForm';
+import { ReferralTable, type ReferralRow } from '@/components/Referral';
 import { SubmitButton } from '@/components/SubmitButton';
 import { Card, Empty, PageHead } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
@@ -17,6 +18,7 @@ export default async function Doctors({ params }: { params: Promise<{ eventId: s
     ctx.supabase.rpc('doctor_insights', { p_event: eventId }),
     ctx.supabase.from('doctors').select('id, notes').eq('event_id', eventId),
   ]);
+  const { data: refRows } = await ctx.supabase.rpc('referral_insights', { p_event: eventId });
   const rows = (stats ?? []) as Row[];
   const notes = (id: string) => (docs ?? []).find((d) => d.id === id)?.notes ?? '';
   const tot = rows.reduce((a, r) => ({ patients: a.patients + r.patients, withTests: a.withTests + r.patients_with_tests, amount: a.amount + r.amount_after_paise }), { patients: 0, withTests: 0, amount: 0 });
@@ -33,6 +35,9 @@ export default async function Doctors({ params }: { params: Promise<{ eventId: s
                 <td>{r.patients_with_tests}{r.patients ? <span className="small muted"> ({Math.round((r.patients_with_tests / r.patients) * 100)}%)</span> : null}</td>
                 <td>{r.tests_after}</td><td>{inr(r.amount_after_paise)}</td><td>{inr(r.paid_after_paise)}</td></tr>))}</tbody></table></div>
         ) : <Empty>No doctors yet. Add the first one below.</Empty>}
+      </Card>
+      <Card title="Referrals" sub="Patients and tests each doctor referred (set at the desk, or from a consultation). Outside doctors are listed by the name typed at the desk.">
+        <ReferralTable rows={(refRows ?? []) as ReferralRow[]} money={ctx.can('finance.view')} />
       </Card>
       <div className="grid grid-2">
         <Card title="Add a doctor">

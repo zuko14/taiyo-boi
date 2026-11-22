@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ReferralTable, type ReferralRow } from '@/components/Referral';
 import { LiveRefresh } from '@/components/LiveRefresh';
 import { Card, Empty, PageHead, Stat } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
@@ -111,6 +112,7 @@ export default async function Revenue({ params }: { params: Promise<{ eventId: s
   const ctx = await requirePerm(eventId, 'finance.view');
   const { data } = await ctx.supabase.rpc('revenue_insights', { p_event: eventId });
   const v = data as Insights;
+  const { data: refRows } = await ctx.supabase.rpc('referral_insights', { p_event: eventId });
   // per-patient discounts given at the registration desk (each order keeps its original amount and reason)
   const { data: discounts } = await ctx.supabase.from('orders').select('id, kind, total_paise, list_total_paise, discount_pct, discount_reason, created_at, registrations(registration_code), order_items(test_name, discount_pct, list_price_paise, unit_price_paise)')
     .eq('event_id', eventId).not('discount_reason', 'is', null).order('created_at', { ascending: false }).limit(200);
@@ -208,6 +210,9 @@ export default async function Revenue({ params }: { params: Promise<{ eventId: s
                 <td className="small">{METHOD[p.method] ?? p.method}</td><td className="strong">{inr(p.amount_paise)}</td>
                 <td>{p.receipt ? <Link className="mono small" href={`/e/${eventId}/receipts/${p.intent_id}`}>{p.receipt}</Link> : '—'}</td></tr>))}</tbody></table></div>
         ) : <Empty>No verified payments yet.</Empty>}
+      </Card>
+      <Card title="Revenue by referring doctor" sub="Every order counted once: the doctor who referred it (or the consultation's doctor), an outside doctor, or not referred. Collected = verified payments − refunds, so the rows add up to Net collected.">
+        <ReferralTable rows={(refRows ?? []) as ReferralRow[]} />
       </Card>
       <Card title="Discounts given at the desk" sub={disc.length ? `${disc.length} order${disc.length === 1 ? '' : 's'} · ${inr(discTotal)} discounted in total` : 'Per-patient discounts entered at registration, with the reason.'}>
         {disc.length ? (

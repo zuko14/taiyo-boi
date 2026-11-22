@@ -296,3 +296,49 @@ describe('doctor consultations', () => {
     expect((await must<unknown[]>(db().from('doctors').select('id').eq('event_id', ev.eventId))).length).toBe(3);   // set-up is kept
   });
 });
+
+describe('referrals', () => {
+  let ev: Fixture; let drA: string;
+  const regStaff = () => ev.users.registration_staff.client;
+  const reg = (extra: Record<string, unknown>) => regStaff().rpc('register_participant', {
+    p_counter: ev.stations['REG-1'], p_idempotency_key: `r-${Math.random()}`, p_full_name: 'Synthetic Referral', p_consent: true, ...extra });
+  beforeAll(async () => {
+    ev = await buildEvent({ code: newCode('REF') });
+    const { data: e } = await db().from('events').select('settings').eq('id', ev.eventId).single();
+    await must(db().from('events').update({ settings: { ...e!.settings, package_mode: 'custom', payment_model: 'patient_pays', payment_methods: ['cash'] } }).eq('id', ev.eventId));
+    await must(db().from('addon_prices').insert([{ event_id: ev.eventId, test_id: ev.tests.PSA, price_paise: 40000 }, { event_id: ev.eventId, test_id: ev.tests.XRAY, price_paise: 50000 }]));
+    drA = await must<string>(ev.users.event_admin.client.rpc('save_doctor', { p_event: ev.eventId, p_id: null, p_name: 'Dr. Ref A', p_specialization: 'Physician' }));
+  });
+
+  it('records the referring doctor on the registration and its orders, and validates it', async () => {
+    const r = await must<{ registration_id: string }>(reg({ p_classification: '', p_test_ids: [ev.tests.PSA], p_referred_name: '  Dr.  Outside   Clinic ' }));
+    const row = await must<{ referred_by_name: string }>(db().from('registrations').select('referred_by_name').eq('id', r.registration_id).single());
+    expect(row.referred_by_name).toBe('Dr. Outside Clinic');
+    const orders = await must<{ referred_by_name: string | null }[]>(db().from('orders').select('referred_by_name').eq('registration_id', r.registration_id));
+    expect(orders.length).toBeGreaterThan(0);
+    expect(orders.every((o) => o.referred_by_name === 'Dr. Outside Clinic')).toBe(true);
+    expect(await rpcError(reg({ p_classification: '', p_test_ids: [ev.tests.PSA], p_referred_doctor: drA, p_referred_name: 'X' }))).toMatch(/not both/);
+    const other = await buildEvent({ code: newCode('REFX') });
+    const foreign = await must<string>(other.users.event_admin.client.rpc('save_doctor', { p_event: other.eventId, p_id: null, p_name: 'Dr. Elsewhere', p_specialization: '' }));
+    expect(await rpcError(reg({ p_classification: '', p_test_ids: [ev.tests.PSA], p_referred_doctor: foreign }))).toMatch(/invalid_doctor/);
+  });
+
+  it('tests after a consultation are referred by that doctor unless the desk names another; money reconciles with revenue', async () => {
+    const r = await must<{ registration_id: string; consultation_id: string }>(reg({ p_classification: '', p_doctor: drA }));
+    const o = await must<{ order_id: string; intent_id: string }>(regStaff().rpc('create_addon_order', { p_reg: r.registration_id, p_desk: ev.stations['REG-1'],
+      p_test_ids: [ev.tests.XRAY], p_idempotency_key: `x-${r.registration_id}`, p_consent: true, p_consultation: r.consultation_id }));
+    expect((await must<{ referred_by_doctor_id: string }>(db().from('orders').select('referred_by_doctor_id').eq('id', o.order_id).single())).referred_by_doctor_id).toBe(drA);
+    // pay it, plus an unreferred patient's order, then compare with revenue
+    await must(ev.users.cashier.client.rpc('verify_payment', { p_intent: o.intent_id, p_method: 'cash', p_provider_ref: null, p_amount_paise: 50000 }));
+    const plain = await must<{ tests_intent_id: string }>(reg({ p_classification: '', p_test_ids: [ev.tests.PSA] }));
+    await must(ev.users.cashier.client.rpc('verify_payment', { p_intent: plain.tests_intent_id, p_method: 'cash', p_provider_ref: null, p_amount_paise: 40000 }));
+
+    const rows = await must<{ kind: string; name: string; patients: number; tests: number; collected_paise: number; pending_paise: number }[]>(
+      ev.users.event_admin.client.rpc('referral_insights', { p_event: ev.eventId }));
+    expect(rows.find((x) => x.name === 'Dr. Ref A')).toMatchObject({ kind: 'camp', patients: 1, tests: 1, collected_paise: 50000 });
+    expect(rows.find((x) => x.kind === 'outside')).toMatchObject({ name: 'Dr. Outside Clinic', pending_paise: 40000 });
+    const rev = await must<{ totals: { collected_paise: number }; refunded_paise: number }>(ev.users.event_admin.client.rpc('revenue_insights', { p_event: ev.eventId }));
+    expect(rows.reduce((n, x) => n + Number(x.collected_paise), 0)).toBe(rev.totals.collected_paise - rev.refunded_paise);
+    expect(rev.totals.collected_paise - rev.refunded_paise).toBe(90000);
+  });
+});
