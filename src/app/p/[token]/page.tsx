@@ -22,6 +22,7 @@ type View = {
   tasks: { id: string; service: string; location: string; source: string; status: string; items: { id: string; name: string; report: string }[] | null }[];
   walkin_centres: { name: string; address: string; hours: string; instructions: string; valid_from: string | null; valid_to: string | null }[];
   report_centres?: { name: string; address: string; hours: string; instructions: string }[];
+  consultations?: { doctor: string; specialization: string; status: string; booked_at: string }[];
   payments: { status: string; amount_paise: number; refunded_paise: number; receipt_no: string | null; items: string[]; kind: 'package' | 'addon' }[];
 };
 
@@ -93,10 +94,20 @@ export default async function Portal({ params }: { params: Promise<{ token: stri
             </>
           ) : (
             <div className="where" style={{ fontSize: '1.2rem' }}>
-              {pkgDay.every((t) => done(t.status)) ? 'All event-day services are complete.' : 'Please wait — you will be assigned to the next free station shortly.'}
+              {(v.consultations ?? []).some((c) => c.status === 'booked') && [...pkgDay, ...addons].every((t) => done(t.status) || t.location !== 'event_day')
+                ? `Please see ${(v.consultations ?? []).filter((c) => c.status === 'booked').map((c) => c.doctor).join(', ')} for your free consultation.`
+                : pkgDay.every((t) => done(t.status)) ? 'All event-day services are complete.' : 'Please wait — you will be assigned to the next free station shortly.'}
             </div>
           )}
         </section>
+
+        {(v.consultations ?? []).length ? (
+          <div className="card">
+            <h3>Doctor consultation (free)</h3>
+            <ul className="list">{(v.consultations ?? []).map((c, i) => (
+              <li key={i}><span><span className="strong">{c.doctor}</span>{c.specialization ? <span className="small muted"> · {c.specialization}</span> : null}</span>
+                <span className={`badge ${c.status === 'completed' ? 'green' : 'amber'}`}>{c.status === 'completed' ? 'Done' : 'Please see the doctor'}</span></li>))}</ul>
+          </div>) : null}
 
         <div className="card">
           <div className="row-between"><h3>Event-day services</h3><span className="small muted">{pct(pkgDay)}%</span></div>

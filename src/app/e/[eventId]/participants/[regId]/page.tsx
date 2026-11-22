@@ -38,6 +38,13 @@ export default async function ParticipantDetail({ params }: { params: Promise<{ 
     ctx.can('report.view') ? ctx.supabase.from('reports').select('id, title, status, version, order_item_id, published_at').eq('registration_id', regId) : Promise.resolve({ data: null }),
   ]);
   const tasks = (tasksRaw ?? []) as Task[];
+  const [{ data: consultRows }, { data: consultOrders }] = await Promise.all([
+    ctx.supabase.from('consultations').select('id, status, booked_at, completed_at, doctors(name, specialization)').eq('registration_id', regId).order('booked_at'),
+    ctx.supabase.from('orders').select('consultation_id, order_items(test_name, status)').eq('registration_id', regId).eq('status', 'active').not('consultation_id', 'is', null),
+  ]);
+  const consultations = (consultRows ?? []) as unknown as { id: string; status: string; booked_at: string; completed_at: string | null; doctors: { name: string; specialization: string } }[];
+  const linked = (cid: string) => ((consultOrders ?? []) as unknown as { consultation_id: string; order_items: { test_name: string; status: string }[] }[])
+    .filter((o) => o.consultation_id === cid).flatMap((o) => o.order_items.filter((i) => i.status === 'active').map((i) => i.test_name)).join(', ');
   // why a waiting participant has no station: per compatible station, what is missing
   const waiting = tasks.filter((t) => t.status === 'waiting_unassigned');
   const [{ data: caps }, { data: sts }, { data: shifts }] = waiting.length ? await Promise.all([
@@ -122,6 +129,15 @@ export default async function ParticipantDetail({ params }: { params: Promise<{ 
           </>
         ) : <div className="where" style={{ fontSize: '1.2rem' }}>{pkgTasks.some((t) => t.location === 'event_day' && !['completed', 'skipped', 'cancelled'].includes(t.status)) ? 'Waiting for the next available station' : 'No event-day step pending'}</div>}
       </section>
+
+      {consultations.length || ctx.can('registration.create') ? (
+        <Card title="Doctor consultations" actions={ctx.can('registration.create') ? <Link className="btn btn-ghost btn-sm" href={`/e/${eventId}/register/existing?reg=${regId}`}>Book consultation / add tests</Link> : null}>
+          {consultations.length ? <ul className="list">{consultations.map((c) => (
+            <li key={c.id}><span><span className="strong">{c.doctors.name}</span> <span className="small muted">{c.doctors.specialization} · booked {dt(c.booked_at, tz)}{c.completed_at ? ` · done ${dt(c.completed_at, tz)}` : ''}</span>
+              {linked(c.id) ? <div className="small text2">Tests after: {linked(c.id)}</div> : null}</span>
+              <StatusBadge status={c.status === 'booked' ? 'pending' : c.status} label={c.status === 'booked' ? 'Waiting' : c.status === 'completed' ? 'Done' : 'Cancelled'} /></li>))}</ul>
+            : <p className="small muted">No doctor consultation.</p>}
+        </Card>) : null}
 
       <div className="grid grid-2">
         <div>

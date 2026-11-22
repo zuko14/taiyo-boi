@@ -22,6 +22,7 @@ const NAV: (Omit<NavItem, 'href'> & { path: string; perms: string[] })[] = [
   { group: 'Setup', path: '/admin/event', label: 'Event & readiness', icon: 'settings', perms: ['event.configure'] },
   { group: 'Setup', path: '/admin/catalog', label: 'Test catalogue', icon: 'list', perms: ['catalogue.view'] },
   { group: 'Setup', path: '/admin/packages', label: 'Packages & services', icon: 'card', perms: ['package.view'] },
+  { group: 'Setup', path: '/admin/doctors', label: 'Doctors', icon: 'users', perms: ['doctor.manage'] },
   { group: 'Setup', path: '/admin/prices', label: 'Add-on prices', icon: 'wallet', perms: ['addon.price.edit'] },
   { group: 'Setup', path: '/admin/stations', label: 'Stations & counters', icon: 'building', perms: ['station.configure', 'station.mapping.edit'] },
   { group: 'Setup', path: '/admin/staff', label: 'Staff & shifts', icon: 'users', perms: ['staff.manage', 'shift.assign'] },

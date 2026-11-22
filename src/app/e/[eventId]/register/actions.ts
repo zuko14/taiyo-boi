@@ -27,6 +27,7 @@ export async function registerParticipant(fd: FormData) {
       p_discounts: Object.keys(discounts).length ? discounts : null,
       p_package_discount_pct: pkgPct || null,
       p_discount_reason: strOrNull(fd, 'discount_reason'),
+      p_doctor: strOrNull(fd, 'doctor_id'),
     }));
   const msg = res.already ? `Already registered (retry detected): ${res.registration_code}` : `Registered ${res.registration_code}`;
   redirect(`/e/${eventId}/participants/${res.registration_id}/tag?ok=${encodeURIComponent(msg)}`);

@@ -33,6 +33,8 @@ export default async function TagPage({ params }: { params: Promise<{ eventId: s
   // staff without payment access still see whether everything is paid (computed per task, yes/no only)
   const unpaid = (tasks ?? []).some((t) => t.payment_intent_id && !(t as unknown as { payment_cleared: boolean }).payment_cleared && !['cancelled', 'completed'].includes(t.status));
   const waiting = (tasks ?? []).some((t) => t.status === 'waiting_unassigned');
+  const { data: consults } = await ctx.supabase.from('consultations').select('id, doctors(name, specialization, notes)').eq('registration_id', regId).eq('status', 'booked').order('booked_at');
+  const doctorNames = (consults ?? []).map((c) => { const d = c.doctors as unknown as { name: string; specialization: string; notes: string }; return `${d.name}${d.specialization ? ` (${d.specialization})` : ''}${d.notes ? ` · ${d.notes}` : ''}`; });
   const st = active?.stations as unknown as { name: string; code: string; location: string; instructions: string } | undefined;
   const staff = active ? ((await ctx.supabase.rpc('station_on_duty', { p_event: eventId })).data as { station_id: string; staff: string }[] | null)?.find((x) => x.station_id === active.station_id)?.staff : undefined;
   const ahead = active?.state === 'queued'
@@ -59,10 +61,13 @@ export default async function TagPage({ params }: { params: Promise<{ eventId: s
             <span className="text2">{(active.participant_tasks as unknown as { service_name: string }).service_name} · {active.state === 'called' ? 'called now — go straight there' : active.state === 'in_service' ? 'being served' : ahead ? `${ahead} ahead` : 'next in line'}</span></div>
           {st.location ? <div className="small text2" style={{ marginTop: 6 }}>{st.location}{st.instructions ? ` · ${st.instructions}` : ''}</div> : null}
           <div className="small muted" style={{ marginTop: 6 }}>After each station, the participant scans the tag QR on their phone to see where to go next.</div>
+          {doctorNames.length ? <div className="text2" style={{ marginTop: 6 }}>Also booked: free doctor consultation — {doctorNames.join(', ')}</div> : null}
         </>) : unpaid ? (
           <div className="where" style={{ fontSize: '1.15rem' }}>Collect the payment first — the first station appears here automatically once it is confirmed.</div>
         ) : waiting ? (
           <div className="where" style={{ fontSize: '1.15rem' }}>No station is free for this participant yet. They will be called automatically; their tag QR shows it. <Link href={`/e/${eventId}/participants/${regId}`}>See why</Link></div>
+        ) : doctorNames.length ? (
+          <div className="where" style={{ fontSize: '1.15rem' }}>Free doctor consultation: {doctorNames.join(', ')}</div>
         ) : (tasks ?? []).length && (tasks ?? []).every((t) => ['completed', 'skipped', 'cancelled'].includes(t.status)) ? (
           <div className="where" style={{ fontSize: '1.15rem' }}>All tests are done.</div>
         ) : <div className="where" style={{ fontSize: '1.15rem' }}>Walk-in tests only — see the participant&apos;s portal for the centre.</div>}

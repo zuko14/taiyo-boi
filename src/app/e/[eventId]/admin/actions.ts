@@ -551,3 +551,10 @@ export async function applyDiscount(fd: FormData) {
   done(error, pct ? `${pct}% discount applied to ${r?.tests ?? 0} test price(s)${r?.packages ? ` and ${r.packages} package(s)` : ''}. Existing orders keep their price.`
     : `Discount removed: original prices restored for ${r?.tests ?? 0} test price(s)${r?.packages ? ` and ${r.packages} package(s)` : ''}.`);
 }
+
+export async function saveDoctor(fd: FormData) {
+  const { eventId, db, done } = await admin(fd, 'Doctor saved');
+  const { error } = await db.rpc('save_doctor', { p_event: eventId, p_id: strOrNull(fd, 'id'), p_name: str(fd, 'name'),
+    p_specialization: str(fd, 'specialization'), p_active: bool(fd, 'active'), p_notes: str(fd, 'notes') });
+  done(error, strOrNull(fd, 'id') ? 'Doctor saved' : 'Doctor added — the registration desk can now book consultations');
+}

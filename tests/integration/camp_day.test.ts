@@ -224,3 +224,75 @@ describe('per-patient discount at the registration desk', () => {
     await must(reg({ p_classification: '', p_test_ids: [ev.tests.PSA] }));
   });
 });
+
+describe('doctor consultations', () => {
+  let ev: Fixture; let drA: string; let drB: string;
+  const regStaff = () => ev.users.registration_staff.client;
+  beforeAll(async () => {
+    ev = await buildEvent({ code: newCode('DOC') });
+    const { data: e } = await db().from('events').select('settings').eq('id', ev.eventId).single();
+    await must(db().from('events').update({ settings: { ...e!.settings, package_mode: 'custom', payment_model: 'patient_pays', payment_methods: ['cash'] } }).eq('id', ev.eventId));
+    await must(db().from('addon_prices').insert([{ event_id: ev.eventId, test_id: ev.tests.PSA, price_paise: 40000 }, { event_id: ev.eventId, test_id: ev.tests.XRAY, price_paise: 50000 }]));
+    drA = await must<string>(ev.users.event_admin.client.rpc('save_doctor', { p_event: ev.eventId, p_id: null, p_name: 'Dr. Synthetic A', p_specialization: 'General physician' }));
+    drB = await must<string>(ev.users.event_admin.client.rpc('save_doctor', { p_event: ev.eventId, p_id: null, p_name: 'Dr. Synthetic B', p_specialization: 'Cardiology' }));
+  });
+
+  it('only doctor managers set up doctors; inactive doctors cannot be booked', async () => {
+    expect(await rpcError(regStaff().rpc('save_doctor', { p_event: ev.eventId, p_id: null, p_name: 'X', p_specialization: '' }))).toMatch(/permission_denied/);
+    expect(await rpcError(regStaff().from('doctors').insert({ event_id: ev.eventId, name: 'X' }))).toMatch(/permission denied|row-level/);
+    const off = await must<string>(ev.users.event_admin.client.rpc('save_doctor', { p_event: ev.eventId, p_id: null, p_name: 'Dr. Away', p_specialization: '', p_active: false }));
+    const r = await register(ev, 'female');
+    expect(await rpcError(regStaff().rpc('book_consultation', { p_reg: r.registration_id, p_doctor: off, p_counter: ev.stations['REG-1'] }))).toMatch(/invalid_doctor/);
+  });
+
+  it('consultation only: registered once, no payment, no queue; then tests advised by the doctor are linked', async () => {
+    const r = await must<{ registration_id: string; consultation_id: string; payment_intent_id: string | null }>(regStaff().rpc('register_participant', {
+      p_counter: ev.stations['REG-1'], p_idempotency_key: `c-${Math.random()}`, p_classification: '', p_full_name: 'Synthetic Consult', p_consent: true, p_doctor: drA }));
+    expect(r.consultation_id).toBeTruthy();
+    expect(r.payment_intent_id ?? null).toBeNull();
+    expect(await must<unknown[]>(db().from('participant_tasks').select('id').eq('registration_id', r.registration_id))).toHaveLength(0);
+
+    await must(regStaff().rpc('set_consultation_status', { p_consultation: r.consultation_id, p_status: 'completed' }));
+    // the same patient (same registration) gets the advised tests, linked to the consultation
+    const o1 = await must<{ order_id: string }>(regStaff().rpc('create_addon_order', { p_reg: r.registration_id, p_desk: ev.stations['REG-1'],
+      p_test_ids: [ev.tests.PSA], p_idempotency_key: `t1-${r.registration_id}`, p_consent: true, p_consultation: r.consultation_id }));
+    const o2 = await must<{ order_id: string }>(regStaff().rpc('create_addon_order', { p_reg: r.registration_id, p_desk: ev.stations['REG-1'],
+      p_test_ids: [ev.tests.XRAY], p_idempotency_key: `t2-${r.registration_id}`, p_consent: true, p_consultation: r.consultation_id }));
+    const linked = await must<{ consultation_id: string }[]>(db().from('orders').select('consultation_id').in('id', [o1.order_id, o2.order_id]));
+    expect(linked.every((o) => o.consultation_id === r.consultation_id)).toBe(true);
+    expect((await must<unknown[]>(db().from('participant_tasks').select('id').eq('registration_id', r.registration_id))).length).toBeGreaterThan(0);
+
+    // a second consultation with another doctor, on the same registration
+    const c2 = await must<string>(regStaff().rpc('book_consultation', { p_reg: r.registration_id, p_doctor: drB, p_counter: ev.stations['REG-1'] }));
+    expect(await must<string>(regStaff().rpc('book_consultation', { p_reg: r.registration_id, p_doctor: drB, p_counter: ev.stations['REG-1'] }))).toBe(c2);
+    expect(await rpcError(regStaff().rpc('set_consultation_status', { p_consultation: c2, p_status: 'cancelled' }))).toMatch(/reason_required/);
+    await must(regStaff().rpc('set_consultation_status', { p_consultation: c2, p_status: 'cancelled', p_reason: 'Patient left' }));
+    expect(await rpcError(regStaff().rpc('set_consultation_status', { p_consultation: c2, p_status: 'completed' }))).toMatch(/illegal_transition/);
+
+    // another patient's consultation cannot be used
+    const other = await register(ev, 'male');
+    expect(await rpcError(regStaff().rpc('create_addon_order', { p_reg: other.registration_id, p_desk: ev.stations['REG-1'],
+      p_test_ids: [ev.tests.PSA], p_idempotency_key: `x-${other.registration_id}`, p_consent: true, p_consultation: r.consultation_id }))).toMatch(/invalid_consultation/);
+
+    const ins = await must<{ name: string; completed: number; cancelled: number; patients: number; patients_with_tests: number; tests_after: number; amount_after_paise: number }[]>(
+      ev.users.event_admin.client.rpc('doctor_insights', { p_event: ev.eventId }));
+    expect(ins.find((d) => d.name === 'Dr. Synthetic A')).toMatchObject({ completed: 1, patients: 1, patients_with_tests: 1, tests_after: 2, amount_after_paise: 90000 });
+    expect(ins.find((d) => d.name === 'Dr. Synthetic B')).toMatchObject({ cancelled: 1, patients: 0, patients_with_tests: 0 });
+
+    // the patient's phone shows the consultation
+    const hash = sha256(`doc-${r.registration_id}`);
+    await must(regStaff().rpc('issue_tag', { p_reg: r.registration_id, p_token_hash: hash, p_reason: null }));
+    const v = await must<{ consultations: { doctor: string; status: string }[] }>(db().rpc('portal_view', { p_token_hash: hash }));
+    expect(v.consultations).toEqual([expect.objectContaining({ doctor: 'Dr. Synthetic A', status: 'completed' })]);
+  });
+
+  it('a package registration can book a consultation too, and an event reset removes consultations', async () => {
+    const r = await must<{ registration_id: string; consultation_id: string }>(regStaff().rpc('register_participant', {
+      p_counter: ev.stations['REG-1'], p_idempotency_key: `p-${Math.random()}`, p_classification: 'female', p_full_name: 'Synthetic Pkg Consult', p_consent: true, p_doctor: drA }));
+    expect(r.consultation_id).toBeTruthy();
+    expect((await must<unknown[]>(db().from('participant_tasks').select('id').eq('registration_id', r.registration_id))).length).toBeGreaterThan(0);
+    await must(db().rpc('_purge_operational', { p_event: ev.eventId }));
+    expect(await must<unknown[]>(db().from('consultations').select('id').eq('event_id', ev.eventId))).toHaveLength(0);
+    expect((await must<unknown[]>(db().from('doctors').select('id').eq('event_id', ev.eventId))).length).toBe(3);   // set-up is kept
+  });
+});

@@ -1,14 +1,15 @@
 import Link from 'next/link';
 import { DutyPicker } from '@/components/DutyPicker';
 import { Icon } from '@/components/Icons';
+import { ScanBox } from '@/components/ScanBox';
 import { SubmitButton } from '@/components/SubmitButton';
 import { Card, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
 import { myStations } from '@/lib/duty';
 import { classLabel, dt, priceWithDiscount } from '@/lib/format';
-import { nowMs } from '@/lib/clock';
 import { TestPicker, type PickTest } from '@/components/TestPicker';
 import { idemKey } from '@/lib/supabase/server';
+import { loadPickTests } from '@/lib/pick-tests';
 import { registerParticipant } from './actions';
 
 type SP = Promise<{ at?: string; employee_id?: string; mobile?: string; name?: string; checked?: string }>;
@@ -27,19 +28,10 @@ export default async function RegisterPage({ params, searchParams }: { params: P
   const sponsored = !custom || ctx.event.settings.payment_model === 'sponsored';
   const sellTests = custom && !sponsored;
   // pay-per-test camps: the event's priced, sellable tests (current price; server recomputes)
-  const [{ data: sellable }, { data: prices }, { data: pkgTests }] = sellTests ? await Promise.all([
-    // every active test is listed (unpriced ones greyed out) so the desk never "loses" ECG, 2D Echo…
-    ctx.supabase.from('test_catalog').select('id, code, display_name, category, location, addon_available').eq('event_id', eventId).eq('active', true).eq('archived', false).order('category').order('display_name'),
-    ctx.supabase.from('addon_prices').select('test_id, price_paise, tax_paise, mrp_paise, discount_pct, location_scope, effective_from, effective_to').eq('event_id', eventId).eq('active', true).order('effective_from', { ascending: false }),
+  const [pickTests, { data: pkgTests }] = sellTests ? await Promise.all([
+    loadPickTests(ctx),
     ctx.supabase.from('package_tests').select('test_id, packages!inner(classification)').eq('event_id', eventId),
-  ]) : [{ data: [] }, { data: [] }, { data: [] }];
-  const now = nowMs();
-  const pickTests: PickTest[] = (sellable ?? []).map((t) => {
-    const p = t.addon_available ? (prices ?? []).find((x) => x.test_id === t.id && (x.location_scope === 'both' || x.location_scope === t.location)
-      && new Date(x.effective_from).getTime() <= now && (!x.effective_to || new Date(x.effective_to).getTime() > now)) : undefined;
-    return { id: t.id, code: t.code, name: t.display_name, category: t.category, location: t.location, price_paise: p ? p.price_paise + p.tax_paise : null,
-      mrp_paise: p && Number(p.discount_pct) > 0 ? p.mrp_paise! + p.tax_paise : null, discount_pct: p ? Number(p.discount_pct) : 0 };
-  });
+  ]) : [[] as PickTest[], { data: [] }];
   const packageTests: Record<string, string[]> = {};
   for (const x of pkgTests ?? []) { const c = (x.packages as unknown as { classification: string }).classification; (packageTests[c] ??= []).push(x.test_id); }
   const pkgChoices = (packages ?? []).filter((p) => p.classification !== 'pay_per_test');
@@ -49,6 +41,11 @@ export default async function RegisterPage({ params, searchParams }: { params: P
   const { data: contents } = await ctx.supabase.from('package_tests').select('package_id, test_catalog(display_name)').eq('event_id', eventId);
   const testsOf = (pkgId: string) => (contents ?? []).filter((c) => c.package_id === pkgId).map((c) => (c.test_catalog as unknown as { display_name: string }).display_name).sort();
 
+  // doctors offering free consultations (no queue); a custom camp may register a patient for a consultation only
+  const { data: doctors } = await ctx.supabase.from('doctors').select('id, name, specialization, notes').eq('event_id', eventId).eq('active', true).order('name');
+  const docs = doctors ?? [];
+  const testsOnly = sellTests && pickTests.some((t) => t.price_paise != null);
+  const consultOnly = custom && docs.length > 0 && !testsOnly;
   const checked = sp.checked === '1';
   const dupes = checked && (sp.employee_id || sp.mobile || sp.name)
     ? (await ctx.supabase.rpc('find_possible_duplicates', { p_event: eventId, p_employee_id: sp.employee_id ?? '', p_mobile: sp.mobile ?? '', p_name: sp.name ?? '' })).data ?? []
@@ -72,16 +69,23 @@ export default async function RegisterPage({ params, searchParams }: { params: P
               <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
                 <legend className="label" style={{ marginBottom: 8 }}>{custom ? 'Package' : 'Classification (required)'}</legend>
                 <div className="choice-cards">
-                  {sellTests && pickTests.some((t) => t.price_paise != null) ? (
+                  {consultOnly ? (
+                    <label className="choice-card">
+                      <input type="radio" name="classification" value="" defaultChecked />
+                      <span className="title">Doctor consultation only</span>
+                      <span className="small text2">No package or tests now — pick the doctor below</span>
+                      <span className="small muted">Free consultation</span>
+                    </label>) : null}
+                  {testsOnly ? (
                     <label className="choice-card">
                       <input type="radio" name="classification" value="" defaultChecked />
                       <span className="title">Tests only</span>
-                      <span className="small text2">No package — pick tests below</span>
+                      <span className="small text2">No package — pick tests below{docs.length ? ', or only a doctor consultation' : ''}</span>
                       <span className="small muted">Pays for the selected tests</span>
                     </label>) : null}
                   {pkgChoices.map((p) => (
                     <label key={p.id} className="choice-card">
-                      <input type="radio" name="classification" value={p.classification} required={!sellTests || !pickTests.some((t) => t.price_paise != null)} disabled={!p.active} />
+                      <input type="radio" name="classification" value={p.classification} required={!testsOnly && !consultOnly} disabled={!p.active} />
                       <span className="title">{classLabel(p.classification)}</span>
                       <span className="small text2">{p.name}</span>
                       {testsOf(p.id).length ? <span className="small muted" title={testsOf(p.id).join(', ')}>{testsOf(p.id).length} tests: {testsOf(p.id).slice(0, 5).join(', ')}{testsOf(p.id).length > 5 ? ` +${testsOf(p.id).length - 5} more` : ''}</span> : null}
@@ -117,12 +121,19 @@ export default async function RegisterPage({ params, searchParams }: { params: P
                   </div>
                 </details>
               ) : null}
+              {docs.length ? (
+                <div className="field"><label htmlFor="doctor_id">Free doctor consultation (optional)</label>
+                  <select id="doctor_id" name="doctor_id" defaultValue=""><option value="">No consultation</option>
+                    {docs.map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialization ? ` — ${d.specialization}` : ''}{d.notes ? ` (${d.notes})` : ''}</option>)}</select>
+                  <span className="help">Books a free consultation (no queue). Tests the doctor advises are added later from “Existing patient”, linked to this consultation.</span></div>) : null}
               <label className="check"><input type="checkbox" name="consent" required={requireConsent} data-required={requireConsent ? '1' : '0'} />
                 <span className="small">Participant has read the privacy notice and consents to registration{requireConsent ? ' (required)' : ''}{custom ? ', and confirms the selected tests and price' : ''}.</span></label>
               <div style={{ marginTop: 14 }}><SubmitButton className="btn btn-accent btn-lg btn-block">Register patient</SubmitButton></div>
             </form>
           </Card>
-          <Card title="2 · Check for an existing patient" sub="Search by an approved identifier before creating a new entry.">
+          <Card title="2 · Existing patient" sub="Already registered (did tests, or saw a doctor)? Do not register again — open them here to book a doctor consultation or add the tests the doctor advised.">
+            <ScanBox action={`${base}/existing`} hidden={{ at: counter }} label="Scan tag, or type code / name / mobile" />
+            <div className="label" style={{ margin: '16px 0 6px' }}>Or check for a duplicate before registering someone new</div>
             <form method="get" action={base}>
               <input type="hidden" name="at" value={counter} /><input type="hidden" name="checked" value="1" />
               <div className="form-row">
@@ -137,7 +148,7 @@ export default async function RegisterPage({ params, searchParams }: { params: P
                 <div className="alert alert-warn" role="alert">Possible existing registration{dupes.length > 1 ? 's' : ''}. Confirm with the participant before creating a new one.</div>
                 <ul className="list">{dupes.map((d: { registration_id: string; registration_code: string; full_name: string; match: string; status: string; created_at: string; classification: string; mobile_last4: string | null }) => (
                   <li key={d.registration_id}>
-                    <div><Link className="strong" href={`/e/${eventId}/participants/${d.registration_id}`}>{d.registration_code}</Link> · {d.full_name}
+                    <div><Link className="strong" href={`${base}/existing?at=${counter}&reg=${d.registration_id}`}>{d.registration_code}</Link> · {d.full_name}
                       <div className="small muted">matched on {d.match} · {classLabel(d.classification)} · mobile …{d.mobile_last4 ?? '—'} · {dt(d.created_at, ctx.event.timezone)}</div></div>
                     <StatusBadge status={d.status} />
                   </li>))}</ul>
