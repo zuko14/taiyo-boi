@@ -5,7 +5,7 @@ import { Card, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
 import { nowMs } from '@/lib/clock';
 import { dt, isoToLocalInput } from '@/lib/format';
-import { addRole, createStaff, setMembershipActive } from '../actions';
+import { addRole, createStaff, resetStaffPassword, setMembershipActive } from '../actions';
 
 export default async function Staff({ params }: { params: Promise<{ eventId: string }> }) {
   const { eventId } = await params;
@@ -88,6 +88,19 @@ export default async function Staff({ params }: { params: Promise<{ eventId: str
                     <button className="btn btn-ghost btn-sm">Add role</button>
                   </AdminForm>
                 </div>
+                <details style={{ marginTop: 8 }}>
+                  <summary className="small text2" style={{ cursor: 'pointer' }}>Reset password (forgot password)</summary>
+                  <AdminForm action={resetStaffPassword} eventId={eventId} back={back} live={live} hidden={{ user_id: p.user_id }} style={{ marginTop: 8 }}>
+                    <div className="form-row">
+                      <div className="field"><label htmlFor={`pw-${p.user_id}`}>New password (min 12 characters)</label>
+                        <input id={`pw-${p.user_id}`} name="password" type="password" minLength={12} required autoComplete="new-password" /></div>
+                      <div className="field"><label htmlFor={`pw2-${p.user_id}`}>Type it again</label>
+                        <input id={`pw2-${p.user_id}`} name="password_confirm" type="password" minLength={12} required autoComplete="new-password" /></div>
+                    </div>
+                    <SubmitButton className="btn btn-ghost btn-sm" confirm={`Set a new password for ${p.full_name}? Their old password stops working.`}>Set new password</SubmitButton>
+                    <p className="small muted" style={{ margin: '6px 0 0' }}>They sign in with <strong>{p.email}</strong> and the new password. Tell them in person or by phone — not in a group chat.</p>
+                  </AdminForm>
+                </details>
               </li>))}</ul>
           </Card>
         </div>) : null}

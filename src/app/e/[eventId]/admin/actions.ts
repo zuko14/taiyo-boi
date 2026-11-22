@@ -312,6 +312,39 @@ export async function createStaff(fd: FormData) {
 }
 
 /**
+ * Admin sets a new password for a staff member who forgot theirs. Only staff of this event; a person
+ * who also works on another event, a platform admin, or an event admin (without permissions.manage)
+ * can only be reset by someone with the matching authority. The password itself is never logged.
+ */
+export async function resetStaffPassword(fd: FormData) {
+  const { eventId, ctx, back } = await admin(fd, 'Staff password reset');
+  if (!ctx.can('staff.manage')) go(back, 'err', 'You do not have permission for this action.');
+  const userId = str(fd, 'user_id'); const password = str(fd, 'password');
+  if (!/^[0-9a-f-]{36}$/.test(userId)) go(back, 'err', 'Staff member not found.');
+  if (password.length < 12) go(back, 'err', 'The new password must be at least 12 characters.');
+  if (password !== str(fd, 'password_confirm')) go(back, 'err', 'The two passwords do not match.');
+  const svc = serviceClient();
+  // service role: authorisation is checked here, against this event's memberships
+  const [{ data: rows }, { data: prof }] = await Promise.all([
+    svc.from('event_memberships').select('event_id, role_code, active').eq('user_id', userId),
+    svc.from('staff_profiles').select('email, full_name, is_platform_admin').eq('user_id', userId).maybeSingle(),
+  ]);
+  const here = (rows ?? []).filter((r) => r.event_id === eventId);
+  if (!prof || !here.length) go(back, 'err', 'This person is not staff of this event.');
+  const superUser = ctx.profile.is_platform_admin;
+  if (prof.is_platform_admin && !superUser) go(back, 'err', 'Only a platform admin can reset a platform admin\'s password.');
+  if ((rows ?? []).some((r) => r.event_id !== eventId) && !superUser) go(back, 'err', 'This person also works on another event. Ask the platform admin to reset their password.');
+  if (here.some((r) => r.role_code === 'event_admin' && r.active) && !ctx.can('permissions.manage') && userId !== ctx.user.id) {
+    go(back, 'err', 'Resetting an Event Admin\'s password needs the permissions.manage permission.');
+  }
+  const { error } = await svc.auth.admin.updateUserById(userId, { password });
+  if (error) go(back, 'err', /weak|short|pwned|characters/i.test(error.message) ? `Password not accepted: ${error.message}` : 'Could not reset the password. Please try again.');
+  await svc.from('audit_logs').insert({ event_id: eventId, actor_id: ctx.user.id, action: 'staff.password_reset', entity_type: 'staff', entity_id: userId,
+    reason: strOrNull(fd, 'reason') ?? 'Staff password reset', meta: { email: prof.email } });
+  go(back, 'ok', `New password set for ${prof.full_name}. Share it privately; they sign in with ${prof.email}.`);
+}
+
+/**
  * Give a person a role: reactivate it if they had it before, otherwise add it. A person can hold any
  * number of roles. (Not an upsert: staff may only toggle `active`, and an upsert's ON CONFLICT
  * UPDATE needs update rights on every column, which failed with "permission denied".)
