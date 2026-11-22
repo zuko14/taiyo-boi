@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 export interface PickTest { id: string; name: string; code: string; category: string; price_paise: number | null; location: string }
 
 const rupees = (p: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(p / 100);
+const price = (p: number) => (p === 0 ? 'Free' : rupees(p));
 // "2D Echo", "2d-echo", "2DECHO" and "x ray" / "X-Ray" all match each other
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -63,7 +64,7 @@ export function TestPicker({ tests, packageTests, priceHref }: { tests: PickTest
                 <label key={t.id} className={`check test-row ${included || noPrice ? 'muted' : ''}`}>
                   <input type="checkbox" name="test_ids" value={t.id} checked={chosen.has(t.id)} disabled={included || noPrice} onChange={() => toggle(t.id)} />
                   <span className="test-name">{t.name}{t.location === 'walk_in' ? <span className="small muted"> · walk-in centre</span> : null}</span>
-                  <span className="test-price">{included ? 'in package' : noPrice ? 'no price set' : rupees(t.price_paise!)}</span>
+                  <span className="test-price">{included ? 'in package' : noPrice ? 'no price set' : price(t.price_paise!)}</span>
                 </label>);
             })}
           </fieldset>))}
@@ -72,7 +73,9 @@ export function TestPicker({ tests, packageTests, priceHref }: { tests: PickTest
         {[...chosen].filter((id) => !shown.some((t) => t.id === id)).map((id) => <input key={id} type="hidden" name="test_ids" value={id} />)}
       </div>
       {unpriced ? <p className="small muted" style={{ margin: '8px 0 0' }}>{unpriced} test{unpriced > 1 ? 's have' : ' has'} no price yet and can only be given inside a package.{priceHref ? <> <a href={priceHref}>Set prices</a></> : ' Ask the event admin to set a price in the Test catalogue.'}</p> : null}
-      {chosen.size ? <p className="small text2" style={{ margin: '8px 0 0' }}>Collect {rupees(total)} by UPI QR or cash after registering. The tests are queued once the payment is verified.</p> : null}
+      {chosen.size ? <p className="small text2" style={{ margin: '8px 0 0' }}>{total > 0
+        ? `Collect ${rupees(total)} by UPI QR or cash after registering. Paid tests are queued once the payment is verified${tests.some((t) => chosen.has(t.id) && t.price_paise === 0) ? '; free tests are queued right away' : ''}.`
+        : 'Free tests — no payment is taken. They are queued right after registration.'}</p> : null}
     </div>
   );
 }

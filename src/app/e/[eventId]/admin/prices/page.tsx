@@ -2,7 +2,7 @@ import { AdminForm, isLive } from '@/components/AdminForm';
 import { SubmitButton } from '@/components/SubmitButton';
 import { Card, Empty, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
-import { dt, inr } from '@/lib/format';
+import { dt, inr, priceLabel } from '@/lib/format';
 import { deactivatePrice, savePrice } from '../actions';
 
 export default async function Prices({ params }: { params: Promise<{ eventId: string }> }) {
@@ -20,7 +20,7 @@ export default async function Prices({ params }: { params: Promise<{ eventId: st
       <Card title="Prices">
         {prices?.length ? <div className="table-wrap"><table><thead><tr><th>Test</th><th>Price</th><th>Tax/fee</th><th>Where</th><th>Pay before service</th><th>Effective</th><th>Status</th><th></th></tr></thead>
           <tbody>{prices.map((p) => { const t = p.test_catalog as unknown as { display_name: string; addon_available: boolean }; return (
-            <tr key={p.id}><td className="strong">{t.display_name}{!t.addon_available ? <div className="small muted">not offered as add-on</div> : null}</td><td>{inr(p.price_paise)}</td><td>{inr(p.tax_paise)}</td>
+            <tr key={p.id}><td className="strong">{t.display_name}{!t.addon_available ? <div className="small muted">not offered as add-on</div> : null}</td><td>{priceLabel(p.price_paise)}</td><td>{inr(p.tax_paise)}</td>
               <td>{p.location_scope.replace('_', ' ')}</td><td>{p.require_payment_before_service ? 'Yes' : 'No'}</td>
               <td className="small">{dt(p.effective_from, ctx.event.timezone)} → {p.effective_to ? dt(p.effective_to, ctx.event.timezone) : 'open'}</td>
               <td><StatusBadge status={p.active ? 'active' : 'closed'} label={p.active ? 'Active' : 'Inactive'} /></td>
@@ -31,7 +31,7 @@ export default async function Prices({ params }: { params: Promise<{ eventId: st
         <AdminForm action={savePrice} eventId={eventId} back={back} live={live}>
           <div className="form-row">
             <div className="field"><label>Test</label><select name="test_id" required>{(tests ?? []).map((t) => <option key={t.id} value={t.id}>{t.display_name}{t.addon_available ? '' : ' (enable add-on in catalogue)'}</option>)}</select></div>
-            <div className="field"><label>Price (₹)</label><input name="price" inputMode="decimal" required /></div>
+            <div className="field"><label>Price (₹)</label><input name="price" inputMode="decimal" required /><span className="help">Enter 0 for a free test (no payment taken).</span></div>
             <div className="field"><label>Tax / fee (₹)</label><input name="tax" inputMode="decimal" defaultValue="0" /></div>
             <div className="field"><label>Available at</label><select name="location_scope" defaultValue="both"><option value="both">Both</option><option value="event_day">Event day</option><option value="walk_in">Walk-in centre</option></select></div>
           </div>

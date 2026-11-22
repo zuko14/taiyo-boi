@@ -63,8 +63,10 @@ export default async function Catalog({ params, searchParams }: { params: Promis
       </div>
       <div className="form-row">
         <div className="field" style={{ flex: 3 }}><label>Operational instructions</label><input name="instructions" defaultValue={t?.instructions} /></div>
-        {canPrice ? <div className="field"><label>Add-on price (₹, employee-paid)</label><input name="price" inputMode="decimal" placeholder="optional"
-          defaultValue={t && priceOf(t.id) != null ? String(priceOf(t.id)! / 100) : ''} /></div> : null}
+        {canPrice ? <div className="field"><label>Price (₹, paid by the participant)</label><input name="price" inputMode="decimal" placeholder="optional"
+          defaultValue={t && priceOf(t.id) != null ? String(priceOf(t.id)! / 100) : ''} />
+          <label className="check" style={{ marginTop: 6 }}><input type="checkbox" name="free" defaultChecked={!!t && priceOf(t.id) === 0} />Free test — offered at ₹0, no payment taken</label>
+          <span className="help">To charge for it again, untick Free and enter the price.</span></div> : null}
       </div>
       <div className="row">
         <label className="check"><input type="checkbox" name="active" defaultChecked={t?.active ?? true} />Active</label>
@@ -107,7 +109,7 @@ export default async function Catalog({ params, searchParams }: { params: Promis
             <tr key={t.id}>
               <td><span className="strong">{t.display_name}</span><div className="mono small muted">{t.code}{t.source_wording && t.source_wording !== t.display_name ? ` · was “${t.source_wording}”` : ''}{t.location === 'walk_in' ? ' · walk-in' : ''}</div></td>
               <td className="small">{t.category || '—'}</td><td className="small">{(services ?? []).find((s) => s.id === svcOf(t.id)?.service_id)?.name ?? <span className="badge red">no visit — cannot be queued</span>}</td>
-              <td>{priceOf(t.id) != null ? inr(priceOf(t.id)!) : '—'}{priceOf(t.id) != null && !t.addon_available ? <div className="small muted">not for sale</div> : null}</td><td><StatusBadge status={t.archived ? 'archived' : t.active ? 'active' : 'closed'} label={t.archived ? 'Archived' : t.active ? 'Active' : 'Inactive'} /></td>
+              <td>{priceOf(t.id) != null ? (priceOf(t.id) === 0 ? <span className="badge green">Free</span> : inr(priceOf(t.id)!)) : '—'}{priceOf(t.id) != null && !t.addon_available ? <div className="small muted">not for sale</div> : null}</td><td><StatusBadge status={t.archived ? 'archived' : t.active ? 'active' : 'closed'} label={t.archived ? 'Archived' : t.active ? 'Active' : 'Inactive'} /></td>
               <td><details><summary className="btn btn-ghost btn-sm">Edit</summary><div style={{ width: 'min(760px, 86vw)', whiteSpace: 'normal', padding: '12px 0' }}>{form(t)}
                 {edit ? <AdminForm action={deleteTest} eventId={eventId} back={back} live={live} hidden={{ id: t.id }} style={{ marginTop: 10 }}>
                   <SubmitButton className="btn btn-red btn-sm" confirm={`Delete ${t.display_name}? It is removed from every package and its add-on prices. Tests already ordered by participants cannot be deleted — archive them instead.`}>Delete test</SubmitButton>

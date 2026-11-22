@@ -89,10 +89,17 @@ export async function saveTest(fd: FormData) {
     fd.set('service_id', sid as string);
   }
   const id = strOrNull(fd, 'id');
+  // "Free test" = an active ₹0 price; it must be on sale, or the desk could not offer it
+  const free = bool(fd, 'free') && ctx.can('addon.price.edit');
+  if (free) fd.set('price', '0');
+  else if (str(fd, 'price') === '0' && id) {
+    const { data: was } = await db.from('addon_prices').select('price_paise').eq('test_id', id).eq('active', true);
+    if (was?.length === 1 && was[0].price_paise === 0) go(back, 'err', 'You unticked Free: enter the price to charge for this test.');
+  }
   const row = {
     event_id: eventId, code: str(fd, 'code').toUpperCase(), display_name: str(fd, 'display_name'), category: str(fd, 'category'),
     lab_order_code: strOrNull(fd, 'lab_order_code'), instructions: str(fd, 'instructions'), location: str(fd, 'location'),
-    active: bool(fd, 'active'), archived: bool(fd, 'archived'), addon_available: bool(fd, 'addon_available'),
+    active: bool(fd, 'active'), archived: bool(fd, 'archived'), addon_available: free || bool(fd, 'addon_available'),
     ...(id ? {} : { source_wording: str(fd, 'display_name') }),
   };
   const res = id ? await db.from('test_catalog').update(row).eq('id', id).select('id').single() : await db.from('test_catalog').insert(row).select('id').single();

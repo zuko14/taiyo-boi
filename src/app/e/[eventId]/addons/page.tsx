@@ -7,7 +7,7 @@ import { UpiPay } from '@/components/UpiPay';
 import { requirePerm } from '@/lib/auth';
 import { nowMs } from '@/lib/clock';
 import { myStations } from '@/lib/duty';
-import { classLabel, inr, locationLabel } from '@/lib/format';
+import { classLabel, inr, locationLabel, priceLabel } from '@/lib/format';
 import { ScanMatches } from '@/components/ScanMatches';
 import { resolveScan, searchRegistrations } from '@/lib/scan';
 import { idemKey } from '@/lib/supabase/server';
@@ -74,7 +74,7 @@ export default async function AddonDesk({ params, searchParams }: { params: Prom
                   <ul className="list">{offer.map((o) => (
                     <li key={o.id}><label className="check"><input type="checkbox" name="t" value={o.id} defaultChecked={selected.includes(o.id)} disabled={!o.price} />
                       <span><span className="strong">{o.display_name}</span> <span className="small muted">· {locationLabel(o.location)}</span></span></label>
-                      <span className="strong">{o.price ? inr(o.price.price_paise + o.price.tax_paise) : <span className="badge red">no price</span>}</span></li>))}</ul>
+                      <span className="strong">{o.price ? priceLabel(o.price.price_paise + o.price.tax_paise) : <span className="badge red">no price</span>}</span></li>))}</ul>
                   <button className="btn btn-ghost" style={{ marginTop: 12 }}>Review total</button>
                 </form>
               ) : <Empty>No add-on tests available for this participant.</Empty>}
@@ -88,7 +88,7 @@ export default async function AddonDesk({ params, searchParams }: { params: Prom
                   <input type="hidden" name="idem" value={await idemKey()} />
                   {selected.map((id) => <input key={id} type="hidden" name="test_ids" value={id} />)}
                   <ul className="list">{selected.map((id) => { const o = offer.find((x) => x.id === id)!; return (
-                    <li key={id}><span>{o.display_name}{o.price!.tax_paise ? <span className="small muted"> (incl. {inr(o.price!.tax_paise)} tax/fee)</span> : null}</span><span>{inr(o.price!.price_paise + o.price!.tax_paise)}</span></li>); })}
+                    <li key={id}><span>{o.display_name}{o.price!.tax_paise ? <span className="small muted"> (incl. {inr(o.price!.tax_paise)} tax/fee)</span> : null}</span><span>{priceLabel(o.price!.price_paise + o.price!.tax_paise)}</span></li>); })}
                     <li><span className="strong">Total payable by participant</span><span className="strong" style={{ fontSize: '1.3rem' }}>{inr(total)}</span></li></ul>
                   <label className="check" style={{ marginTop: 10 }}><input type="checkbox" name="consent" required /><span className="small">Participant confirmed the tests and the total above.</span></label>
                   <div style={{ marginTop: 12 }}><SubmitButton className="btn btn-accent btn-block">Create add-on order</SubmitButton></div>

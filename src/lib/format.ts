@@ -3,6 +3,9 @@
 export const inr = (paise: number | null | undefined) =>
   paise == null ? '—' : new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(paise / 100);
 
+/** Test price for display: ₹0 is a free test. */
+export const priceLabel = (paise: number | null | undefined) => (paise === 0 ? 'Free' : inr(paise));
+
 export const toPaise = (rupees: string) => {
   const n = Number(rupees);
   if (!Number.isFinite(n) || n < 0) throw new Error('Enter a valid amount');

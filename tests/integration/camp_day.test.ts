@@ -87,3 +87,38 @@ describe('online report window', () => {
     await must(db().from('events').update({ ends_at: null, settings: ev.settings }).eq('id', fx.eventId));
   });
 });
+
+describe('free tests (active ₹0 price)', () => {
+  const price = async (ev: Fixture, code: string, paise: number) =>
+    must(db().from('addon_prices').insert({ event_id: ev.eventId, test_id: ev.tests[code], price_paise: paise }));
+
+  it('add-on desk: a free test creates no payment and is not held by a paid test bought with it', async () => {
+    const ev = await buildEvent({ code: newCode('FREE') });
+    await price(ev, 'XRAY', 0); await price(ev, 'PSA', 40000);
+    const r = await register(ev, 'female');                    // XRAY and PSA are outside the female package
+    const order = await must<{ intent_id: string | null }>(ev.users.addon_staff.client.rpc('create_addon_order', {
+      p_reg: r.registration_id, p_desk: ev.stations['ADD-1'], p_test_ids: [ev.tests.XRAY, ev.tests.PSA], p_idempotency_key: `k-${r.registration_id}`, p_consent: true }));
+    const intent = await must<{ amount_paise: number }>(db().from('payment_intents').select('amount_paise').eq('id', order.intent_id!).single());
+    expect(intent.amount_paise).toBe(40000);                    // only the paid test
+    const tasks = await must<{ service_name: string; payment_intent_id: string | null; source: string }[]>(
+      db().from('participant_tasks').select('service_name, payment_intent_id, source').eq('registration_id', r.registration_id).eq('source', 'addon'));
+    expect(tasks.find((t) => /x-?ray/i.test(t.service_name))?.payment_intent_id).toBeNull();
+    const freeOnly = await register(ev, 'female');
+    const o2 = await must<{ intent_id: string | null }>(ev.users.addon_staff.client.rpc('create_addon_order', {
+      p_reg: freeOnly.registration_id, p_desk: ev.stations['ADD-1'], p_test_ids: [ev.tests.XRAY], p_idempotency_key: `k-${freeOnly.registration_id}`, p_consent: true }));
+    expect(o2.intent_id ?? null).toBeNull();
+  });
+
+  it('registration desk (pay-per-test camp): free tests only → registered with no payment and queued', async () => {
+    const ev = await buildEvent({ code: newCode('FREG') });
+    const { data: e } = await db().from('events').select('settings').eq('id', ev.eventId).single();
+    await must(db().from('events').update({ settings: { ...e!.settings, package_mode: 'custom', payment_model: 'patient_pays', payment_methods: ['cash'] } }).eq('id', ev.eventId));
+    await price(ev, 'ECG', 0);
+    const r = await must<{ registration_id: string; tests_intent_id: string | null; payment_intent_id: string | null }>(ev.users.registration_staff.client.rpc('register_participant', {
+      p_counter: ev.stations['REG-1'], p_idempotency_key: `free-${ev.eventId}`, p_classification: '', p_full_name: 'Synthetic Free', p_consent: true, p_test_ids: [ev.tests.ECG] }));
+    expect([r.tests_intent_id ?? null, r.payment_intent_id ?? null]).toEqual([null, null]);
+    expect(await must<unknown[]>(db().from('payment_intents').select('id').eq('registration_id', r.registration_id))).toHaveLength(0);
+    const a = await activeAssignment(r.registration_id);
+    expect(a?.station_id).toBe(ev.stations['ECG-1'] === a?.station_id ? ev.stations['ECG-1'] : ev.stations['ECG-2']);
+  });
+});
