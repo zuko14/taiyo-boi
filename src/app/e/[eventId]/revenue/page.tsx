@@ -111,6 +111,13 @@ export default async function Revenue({ params }: { params: Promise<{ eventId: s
   const ctx = await requirePerm(eventId, 'finance.view');
   const { data } = await ctx.supabase.rpc('revenue_insights', { p_event: eventId });
   const v = data as Insights;
+  // per-patient discounts given at the registration desk (each order keeps its original amount and reason)
+  const { data: discounts } = await ctx.supabase.from('orders').select('id, kind, total_paise, list_total_paise, discount_pct, discount_reason, created_at, registrations(registration_code), order_items(test_name, discount_pct, list_price_paise, unit_price_paise)')
+    .eq('event_id', eventId).not('discount_reason', 'is', null).order('created_at', { ascending: false }).limit(200);
+  type Disc = { id: string; kind: string; total_paise: number; list_total_paise: number | null; discount_pct: number; discount_reason: string; created_at: string;
+    registrations: { registration_code: string } | null; order_items: { test_name: string; discount_pct: number }[] };
+  const disc = (discounts ?? []) as unknown as Disc[];
+  const discTotal = disc.reduce((n, d) => n + Math.max(0, (d.list_total_paise ?? d.total_paise) - d.total_paise), 0);
   const tz = ctx.event.timezone;
   const net = v.totals.collected_paise - v.refunded_paise;
   const avg = v.totals.paying_participants ? Math.round(net / v.totals.paying_participants) : 0;
@@ -201,6 +208,17 @@ export default async function Revenue({ params }: { params: Promise<{ eventId: s
                 <td className="small">{METHOD[p.method] ?? p.method}</td><td className="strong">{inr(p.amount_paise)}</td>
                 <td>{p.receipt ? <Link className="mono small" href={`/e/${eventId}/receipts/${p.intent_id}`}>{p.receipt}</Link> : '—'}</td></tr>))}</tbody></table></div>
         ) : <Empty>No verified payments yet.</Empty>}
+      </Card>
+      <Card title="Discounts given at the desk" sub={disc.length ? `${disc.length} order${disc.length === 1 ? '' : 's'} · ${inr(discTotal)} discounted in total` : 'Per-patient discounts entered at registration, with the reason.'}>
+        {disc.length ? (
+          <div className="table-wrap"><table><thead><tr><th>When</th><th>Patient</th><th>What</th><th>Price</th><th>Reason</th></tr></thead>
+            <tbody>{disc.map((d) => (
+              <tr key={d.id}><td className="small">{dt(d.created_at, tz, false)}</td><td className="mono small">{d.registrations?.registration_code ?? '—'}</td>
+                <td className="wrap small">{d.kind === 'package' ? `Package · ${Number(d.discount_pct)}% off`
+                  : d.order_items.filter((i) => Number(i.discount_pct) > 0).map((i) => `${i.test_name} (${Number(i.discount_pct)}% off)`).join(', ')}</td>
+                <td className="small"><s className="muted">{inr(d.list_total_paise)}</s> {inr(d.total_paise)}</td>
+                <td className="wrap small">{d.discount_reason}</td></tr>))}</tbody></table></div>
+        ) : <Empty>No desk discounts given.</Empty>}
       </Card>
       {ctx.event.settings.package_mode === 'female_male'
         ? <p className="small muted">Sponsored Female/Male package rates are not participant payments and are never shown here.</p> : null}

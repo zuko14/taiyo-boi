@@ -43,6 +43,8 @@ export default async function RegisterPage({ params, searchParams }: { params: P
   const packageTests: Record<string, string[]> = {};
   for (const x of pkgTests ?? []) { const c = (x.packages as unknown as { classification: string }).classification; (packageTests[c] ??= []).push(x.test_id); }
   const pkgChoices = (packages ?? []).filter((p) => p.classification !== 'pay_per_test');
+  const canDiscount = sellTests && ctx.can('registration.discount');
+  const packagePrices: Record<string, number> = Object.fromEntries(pkgChoices.filter((p) => p.active && (p.price_paise ?? 0) > 0).map((p) => [p.classification, p.price_paise!]));
   // what each package contains, shown on its card so the desk can tell the patient
   const { data: contents } = await ctx.supabase.from('package_tests').select('package_id, test_catalog(display_name)').eq('event_id', eventId);
   const testsOf = (pkgId: string) => (contents ?? []).filter((c) => c.package_id === pkgId).map((c) => (c.test_catalog as unknown as { display_name: string }).display_name).sort();
@@ -88,7 +90,9 @@ export default async function RegisterPage({ params, searchParams }: { params: P
                   ))}
                 </div>
               </fieldset>
-              {sellTests && pickTests.length ? <TestPicker tests={pickTests} packageTests={packageTests} priceHref={ctx.can('addon.price.edit') ? `/e/${eventId}/admin/prices` : undefined} /> : null}
+              {sellTests && (pickTests.length || (canDiscount && Object.keys(packagePrices).length))
+                ? <TestPicker tests={pickTests} packageTests={packageTests} priceHref={ctx.can('addon.price.edit') ? `/e/${eventId}/admin/prices` : undefined}
+                    canDiscount={canDiscount} packagePrices={packagePrices} /> : null}
               {sellTests && !pickTests.length ? <p className="small muted">No priced tests yet — add them (or upload a CSV) in the Test catalogue to sell individual tests here.</p> : null}
               <div className="field"><label htmlFor="full_name">Full name</label><input id="full_name" name="full_name" required maxLength={120} defaultValue={sp.name} autoFocus /></div>
               <div className="form-row">

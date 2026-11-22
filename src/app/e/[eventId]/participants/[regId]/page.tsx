@@ -10,7 +10,7 @@ import { env } from '@/lib/env';
 import { classLabel, dt, inr, locationLabel } from '@/lib/format';
 import { nowMs } from '@/lib/clock';
 
-type Item = { id: string; test_name: string; test_code: string; source: string; status: string; unit_price_paise: number; location: string };
+type Item = { id: string; test_name: string; test_code: string; source: string; status: string; unit_price_paise: number; location: string; list_price_paise: number | null; discount_pct: number };
 type Task = { id: string; service_id: string; service_name: string; location: string; source: string; status: string; status_reason: string | null;
   choice_group_id: string | null; payment_intent_id: string | null; payment_exception: boolean; external_accession: string | null;
   stations: { name: string; code: string } | null; task_items: { order_items: Item }[] };
@@ -29,7 +29,7 @@ export default async function ParticipantDetail({ params }: { params: Promise<{ 
   const snap = (reg.package_configuration_versions as { snapshot: Snapshot }).snapshot;
 
   const [{ data: tasksRaw }, { data: queue }, { data: prints }, payments, reports] = await Promise.all([
-    ctx.supabase.from('participant_tasks').select('*, stations(name, code), task_items(order_items(id, test_name, test_code, source, status, unit_price_paise, location))')
+    ctx.supabase.from('participant_tasks').select('*, stations(name, code), task_items(order_items(id, test_name, test_code, source, status, unit_price_paise, location, list_price_paise, discount_pct))')
       .eq('registration_id', regId).order('location').order('created_at'),
     ctx.supabase.from('queue_assignments').select('*, stations(name, code)').eq('registration_id', regId).order('assigned_at', { ascending: false }).limit(20),
     ctx.supabase.from('tag_prints').select('*').eq('registration_id', regId).order('created_at'),
@@ -77,7 +77,7 @@ export default async function ParticipantDetail({ params }: { params: Promise<{ 
         <div className="row small text2" style={{ gap: 6, marginTop: 4 }}>
           {t.task_items.filter((ti) => ti.order_items.status === 'active').map(({ order_items: i }) => {
             const rp = reportFor(i.id);
-            return <span key={i.id} className="badge plain" title={rp ? `Report v${rp.version}: ${rp.status}` : 'No report yet'}>{i.test_name}{rp ? ` · ${rp.status === 'published' ? 'report ✓' : 'report …'}` : ''}</span>;
+            return <span key={i.id} className="badge plain" title={rp ? `Report v${rp.version}: ${rp.status}` : 'No report yet'}>{i.test_name}{Number(i.discount_pct) > 0 ? ` · ${Number(i.discount_pct)}% off` : ''}{rp ? ` · ${rp.status === 'published' ? 'report ✓' : 'report …'}` : ''}</span>;
           })}
         </div>
         {group && ctx.can('choice.select') && ['awaiting_choice', 'not_attended', 'not_ready'].includes(t.status) && group.rule !== 'bundled' ? (

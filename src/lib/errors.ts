@@ -3,6 +3,7 @@ const MESSAGES: Record<string, string> = {
   permission_denied: 'You do not have permission for this action.',
   not_on_duty: 'You have no active shift at this counter/station.',
   event_not_live: 'The event is not live, so operational changes are blocked.',
+  invalid_amount: 'Invalid amount.',
   reason_required: 'A reason is required for this action.',
   consent_required: 'Participant consent / confirmation is required.',
   illegal_transition: 'That action is not allowed in the current state.',

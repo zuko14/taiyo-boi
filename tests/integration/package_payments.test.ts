@@ -51,7 +51,7 @@ describe('participant-paid package', () => {
     const after = await tasks(r.registration_id);
     expect(after[0].status).toBe('called');            // station free: called automatically, no 'Call next'
     const rc = await must<{ snapshot: { package: { name: string; amount_paise: number } } }>(db().from('receipts').select('snapshot').eq('receipt_no', res.receipt_no).single());
-    expect(rc.snapshot.package).toEqual({ name: 'Basic', amount_paise: 49900 });
+    expect(rc.snapshot.package).toEqual({ name: 'Basic', amount_paise: 49900, list_paise: null, discount_pct: 0 });
   });
 
   it('a later price change never alters an existing registration', async () => {

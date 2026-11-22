@@ -176,3 +176,51 @@ describe('discounts', () => {
     expect((await must<{ price_paise: number }>(db().from('packages').select('price_paise').eq('id', ev.packages.female).single())).price_paise).toBe(180000);
   });
 });
+
+describe('per-patient discount at the registration desk', () => {
+  let ev: Fixture;
+  const reg = (extra: Record<string, unknown>) => ev.users.registration_staff.client.rpc('register_participant', {
+    p_counter: ev.stations['REG-1'], p_idempotency_key: `d-${Math.random()}`, p_full_name: 'Synthetic Desk', p_consent: true, ...extra });
+  beforeAll(async () => {
+    ev = await buildEvent({ code: newCode('DDSK') });
+    const { data: e } = await db().from('events').select('settings').eq('id', ev.eventId).single();
+    await must(db().from('events').update({ settings: { ...e!.settings, package_mode: 'custom', payment_model: 'patient_pays', payment_methods: ['cash'] } }).eq('id', ev.eventId));
+    await must(db().from('addon_prices').insert([{ event_id: ev.eventId, test_id: ev.tests.PSA, price_paise: 40000 }, { event_id: ev.eventId, test_id: ev.tests.XRAY, price_paise: 50000 }]));
+    await must(ev.users.event_admin.client.rpc('set_package_rate', { p_package: ev.packages.male, p_amount_paise: 200000, p_reason: 'set price' }));
+  });
+
+  it('discounts only this patient, is charged, and is tracked with who and why', async () => {
+    const r = await must<{ registration_id: string; tests_intent_id: string }>(reg({ p_classification: '', p_test_ids: [ev.tests.PSA, ev.tests.XRAY],
+      p_discounts: { [ev.tests.PSA]: 25 }, p_discount_reason: 'Senior citizen' }));
+    const intent = await must<{ amount_paise: number }>(db().from('payment_intents').select('amount_paise').eq('id', r.tests_intent_id).single());
+    expect(intent.amount_paise).toBe(30000 + 50000);
+    const items = await must<{ test_code: string; unit_price_paise: number; list_price_paise: number | null; discount_pct: number }[]>(
+      db().from('order_items').select('test_code, unit_price_paise, list_price_paise, discount_pct').eq('registration_id', r.registration_id).order('test_code'));
+    expect(items.map((i) => [i.test_code, i.unit_price_paise, i.list_price_paise, Number(i.discount_pct)])).toEqual([['PSA', 30000, 40000, 25], ['XRAY', 50000, null, 0]]);
+    const order = await must<{ discount_reason: string; discounted_by: string; list_total_paise: number }>(db().from('orders').select('discount_reason, discounted_by, list_total_paise').eq('registration_id', r.registration_id).eq('kind', 'addon').single());
+    expect(order).toMatchObject({ discount_reason: 'Senior citizen', discounted_by: ev.users.registration_staff.id, list_total_paise: 90000 });
+    // the catalogue price and the next patient are unaffected
+    const next = await must<{ tests_intent_id: string }>(reg({ p_classification: '', p_test_ids: [ev.tests.PSA] }));
+    expect((await must<{ amount_paise: number }>(db().from('payment_intents').select('amount_paise').eq('id', next.tests_intent_id).single())).amount_paise).toBe(40000);
+  });
+
+  it('package discount: 25% charged at 75%; 100% leaves no payment but keeps the record', async () => {
+    const a = await must<{ registration_id: string; payment_intent_id: string }>(reg({ p_classification: 'male', p_package_discount_pct: 25, p_discount_reason: 'Organiser family' }));
+    expect((await must<{ amount_paise: number }>(db().from('payment_intents').select('amount_paise').eq('id', a.payment_intent_id).single())).amount_paise).toBe(150000);
+    const b = await must<{ registration_id: string; payment_intent_id: string | null }>(reg({ p_classification: 'male', p_package_discount_pct: 100, p_discount_reason: 'Sponsored by organiser' }));
+    expect(b.payment_intent_id ?? null).toBeNull();
+    const o = await must<{ total_paise: number; list_total_paise: number; discount_pct: number }>(db().from('orders').select('total_paise, list_total_paise, discount_pct').eq('registration_id', b.registration_id).not('discount_reason', 'is', null).single());
+    expect([o.total_paise, o.list_total_paise, Number(o.discount_pct)]).toEqual([0, 200000, 100]);
+  });
+
+  it('needs a reason, a valid %, a selected test, and the registration.discount permission', async () => {
+    expect(await rpcError(reg({ p_classification: '', p_test_ids: [ev.tests.PSA], p_discounts: { [ev.tests.PSA]: 10 } }))).toMatch(/reason_required/);
+    expect(await rpcError(reg({ p_classification: '', p_test_ids: [ev.tests.PSA], p_discounts: { [ev.tests.PSA]: 120 }, p_discount_reason: 'x' }))).toMatch(/invalid_amount/);
+    expect(await rpcError(reg({ p_classification: '', p_test_ids: [ev.tests.PSA], p_discounts: { [ev.tests.XRAY]: 10 }, p_discount_reason: 'x' }))).toMatch(/invalid_amount/);
+    expect(await rpcError(reg({ p_classification: 'female', p_package_discount_pct: 10, p_discount_reason: 'x' }))).toMatch(/no price to discount/);
+    await must(db().from('role_permissions').delete().eq('event_id', ev.eventId).eq('permission_code', 'registration.discount'));
+    expect(await rpcError(reg({ p_classification: '', p_test_ids: [ev.tests.PSA], p_discounts: { [ev.tests.PSA]: 10 }, p_discount_reason: 'x' }))).toMatch(/permission_denied/);
+    // without a discount, registration still works for staff without the permission
+    await must(reg({ p_classification: '', p_test_ids: [ev.tests.PSA] }));
+  });
+});
