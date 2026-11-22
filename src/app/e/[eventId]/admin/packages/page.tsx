@@ -3,7 +3,7 @@ import { SubmitButton } from '@/components/SubmitButton';
 import { Card, PageHead } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
 import Link from 'next/link';
-import { classLabel, inr, locationLabel } from '@/lib/format';
+import { classLabel, locationLabel, priceWithDiscount } from '@/lib/format';
 import { PackageTestPicker } from '@/components/PackageTestPicker';
 import { PackagesImport } from '@/components/PackagesImport';
 import { importPackages, addNewTestToPackage, addPackageTest, setPackageTests, createPackage, deletePackage, removePackageTest, saveChoiceGroup, savePackage, savePackageTest, saveService, setPackageRate } from '../actions';
@@ -54,7 +54,7 @@ export default async function Packages({ params, searchParams }: { params: Promi
               <tr key={p.id}><td><Link className="strong" href={`${base}?pkg=${p.id}`}>{p.name}</Link><div className="mono small muted">{p.code} · letter {p.code_letter}</div></td>
                 <td>{p.code === 'PAY_PER_TEST' ? <span className="muted small">picked at the desk</span> : n.length || <span className="badge red">none</span>}</td>
                 <td className="small">{p.code === 'PAY_PER_TEST' ? '—' : stops.size}</td>
-                <td>{!custom ? 'Sponsored' : p.price_paise ? inr(p.price_paise) : 'Free'}</td>
+                <td>{!custom ? 'Sponsored' : p.price_paise ? priceWithDiscount(p.price_paise, p.mrp_paise, p.discount_pct) : 'Free'}</td>
                 <td>{p.active ? <span className="badge green">Active</span> : <span className="badge">Inactive</span>}</td>
                 <td><Link className="btn btn-ghost btn-sm" href={`${base}?pkg=${p.id}`}>Open</Link></td></tr>); })}</tbody></table></div>
         ) : <p className="muted small">{sp.q ? `No package matches “${sp.q}”.` : 'No packages yet.'}</p>}
@@ -104,7 +104,7 @@ export default async function Packages({ params, searchParams }: { params: Promi
           price_paise: (prices ?? []).find((x) => x.test_id === t.id)?.price_paise ?? null }));
         return (
           <Card key={p.id} title={custom ? `${p.name} · ${p.code}` : `${classLabel(p.classification)} · ${p.name}`}
-            sub={`Registration codes use letter “${p.code_letter}”. ${custom ? (p.price_paise ? `Participant pays ${inr(p.price_paise)} (collected at registration).` : 'Free for the participant.') : 'Employee charge: ₹0.'}${!p.active ? ' Inactive.' : ''}`}>
+            sub={`Registration codes use letter “${p.code_letter}”. ${custom ? (p.price_paise ? `Participant pays ${priceWithDiscount(p.price_paise, p.mrp_paise, p.discount_pct)} (collected at registration).` : 'Free for the participant.') : 'Employee charge: ₹0.'}${!p.active ? ' Inactive.' : ''}`}>
             <div className="grid grid-2">
               <div>
                 <div className="label" style={{ marginBottom: 8 }}>Task plan preview (one queue stop per service)</div>
@@ -122,8 +122,10 @@ export default async function Packages({ params, searchParams }: { params: Promi
                 </AdminForm>
                 {custom && canPkg ? (<>
                   <AdminForm action={setPackageRate} eventId={eventId} back={back} live={live} hidden={{ id: p.id }} className="row" style={{ marginTop: 12, alignItems: 'flex-end' }}>
-                    <div className="field" style={{ flex: 1, marginBottom: 0 }}><label>Price paid by the participant (₹, blank or 0 = free)</label>
-                      <input name="price" inputMode="decimal" placeholder="free" defaultValue={p.price_paise ? String(p.price_paise / 100) : ''} /></div>
+                    <div className="field" style={{ flex: 1, marginBottom: 0 }}><label>Package price (₹, blank or 0 = free)</label>
+                      <input name="price" inputMode="decimal" placeholder="free" defaultValue={p.mrp_paise ?? p.price_paise ? String((p.mrp_paise ?? p.price_paise) / 100) : ''} /></div>
+                    <div className="field" style={{ width: 130, marginBottom: 0 }}><label>Discount %</label>
+                      <input name="discount_pct" inputMode="decimal" placeholder="0" defaultValue={Number(p.discount_pct) ? String(Number(p.discount_pct)) : ''} /></div>
                     <SubmitButton className="btn btn-ghost btn-sm">Save price</SubmitButton>
                   </AdminForm>
                   <AdminForm action={deletePackage} eventId={eventId} back={back} live={live} hidden={{ id: p.id }} style={{ marginTop: 12 }}>

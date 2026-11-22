@@ -6,6 +6,21 @@ export const inr = (paise: number | null | undefined) =>
 /** Test price for display: ₹0 is a free test. */
 export const priceLabel = (paise: number | null | undefined) => (paise === 0 ? 'Free' : inr(paise));
 
+/** Final price after a discount. Same rounding as the database check (addon_prices/packages_discount_math). */
+export const discounted = (mrpPaise: number, pct: number) => Math.round((mrpPaise * (10000 - Math.round(pct * 100))) / 10000);
+
+/** Discount % from a form field: blank = 0; 0–100 with up to 2 decimals. */
+export const toPct = (v: string) => {
+  if (!v.trim()) return 0;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || n > 100 || Math.abs(Math.round(n * 100) - n * 100) > 1e-6) throw new Error('Discount must be a percentage from 0 to 100 (e.g. 10 or 12.5)');
+  return n;
+};
+
+/** "₹800 (₹1,000 − 20%)" when discounted, otherwise the plain price / Free. */
+export const priceWithDiscount = (paise: number | null | undefined, mrp?: number | null, pct?: number | string | null) =>
+  Number(pct) > 0 && mrp != null && paise != null ? `${priceLabel(paise)} (was ${inr(mrp)}, ${Number(pct)}% off)` : priceLabel(paise);
+
 export const toPaise = (rupees: string) => {
   const n = Number(rupees);
   if (!Number.isFinite(n) || n < 0) throw new Error('Enter a valid amount');

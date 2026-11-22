@@ -6,6 +6,7 @@ import { inr, locationLabel } from '@/lib/format';
 import { deleteTest, importCatalog, saveTest } from '../actions';
 import { CatalogImport } from '@/components/CatalogImport';
 import Link from 'next/link';
+import { DiscountAll } from '@/components/DiscountAll';
 
 type Test = { id: string; code: string; display_name: string; category: string; source_wording: string; lab_order_code: string | null; instructions: string;
   location: string; active: boolean; archived: boolean; addon_available: boolean };
@@ -29,9 +30,10 @@ export default async function Catalog({ params, searchParams }: { params: Promis
     ctx.supabase.from('test_catalog').select('*').eq('event_id', eventId).order('archived').order('location').order('display_name'),
     ctx.supabase.from('workflow_services').select('id, code, name, location, active').eq('event_id', eventId).order('name'),
     ctx.supabase.from('workflow_service_tests').select('test_id, service_id, completion_rule').eq('event_id', eventId),
-    ctx.supabase.from('addon_prices').select('test_id, price_paise, created_at').eq('event_id', eventId).eq('active', true).order('created_at', { ascending: false }),
+    ctx.supabase.from('addon_prices').select('test_id, price_paise, mrp_paise, discount_pct, created_at').eq('event_id', eventId).eq('active', true).order('created_at', { ascending: false }),
   ]);
   const priceOf = (id: string) => (prices ?? []).find((p) => p.test_id === id)?.price_paise;
+  const priceRow = (id: string) => (prices ?? []).find((p) => p.test_id === id);
   const svcOf = (id: string) => (map ?? []).find((m) => m.test_id === id);
   const all = (tests ?? []) as Test[];
   const categories = [...new Set(all.map((t) => t.category || 'Uncategorised'))].sort();
@@ -64,9 +66,12 @@ export default async function Catalog({ params, searchParams }: { params: Promis
       <div className="form-row">
         <div className="field" style={{ flex: 3 }}><label>Operational instructions</label><input name="instructions" defaultValue={t?.instructions} /></div>
         {canPrice ? <div className="field"><label>Price (₹, paid by the participant)</label><input name="price" inputMode="decimal" placeholder="optional"
-          defaultValue={t && priceOf(t.id) != null ? String(priceOf(t.id)! / 100) : ''} />
+          defaultValue={t && priceRow(t.id) ? String((priceRow(t.id)!.mrp_paise ?? priceRow(t.id)!.price_paise) / 100) : ''} />
+          <span className="help">The original price. Add a discount below to reduce what the participant pays.</span>
           <label className="check" style={{ marginTop: 6 }}><input type="checkbox" name="free" defaultChecked={!!t && priceOf(t.id) === 0} />Free test — offered at ₹0, no payment taken</label>
           <span className="help">To charge for it again, untick Free and enter the price.</span></div> : null}
+        {canPrice ? <div className="field"><label>Discount %</label><input name="discount_pct" inputMode="decimal" placeholder="0" defaultValue={t && Number(priceRow(t.id)?.discount_pct) ? String(Number(priceRow(t.id)!.discount_pct)) : ''} />
+          <span className="help">Participant pays the price minus this %. Blank = no discount.</span></div> : null}
       </div>
       <div className="row">
         <label className="check"><input type="checkbox" name="active" defaultChecked={t?.active ?? true} />Active</label>
@@ -84,6 +89,10 @@ export default async function Catalog({ params, searchParams }: { params: Promis
         ? "Brochure shorthand (B2, BT2, D) is kept as supplied. Edit names/codes only from the Lab Partner's approved catalogue."
         : 'All tests offered at this camp. Add them to packages on the Packages page; an add-on price makes a test purchasable by participants.'} />
       {!edit ? <div className="alert alert-info">Read-only: you do not have catalogue.edit.</div> : null}
+      {canPrice ? (
+        <details className="card"><summary className="strong" style={{ cursor: 'pointer' }}>Discount on many tests at once</summary>
+          <div style={{ marginTop: 10 }}><DiscountAll eventId={eventId} back={back} live={live} categories={categories} packages={ctx.event.settings.package_mode !== 'female_male'} /></div>
+        </details>) : null}
       {edit ? (
         <details className="card" open={!all.length}><summary className="strong" style={{ cursor: 'pointer' }}>Bulk upload tests and prices (CSV)</summary>
           <p className="small text2">Columns: code, name, category, price_inr, location (event_day / walk_in), service. Blank code is generated from the name; blank service = Sample collection. Re-uploading the same codes updates names and prices — existing orders keep their old price.</p>
@@ -109,7 +118,7 @@ export default async function Catalog({ params, searchParams }: { params: Promis
             <tr key={t.id}>
               <td><span className="strong">{t.display_name}</span><div className="mono small muted">{t.code}{t.source_wording && t.source_wording !== t.display_name ? ` · was “${t.source_wording}”` : ''}{t.location === 'walk_in' ? ' · walk-in' : ''}</div></td>
               <td className="small">{t.category || '—'}</td><td className="small">{(services ?? []).find((s) => s.id === svcOf(t.id)?.service_id)?.name ?? <span className="badge red">no visit — cannot be queued</span>}</td>
-              <td>{priceOf(t.id) != null ? (priceOf(t.id) === 0 ? <span className="badge green">Free</span> : inr(priceOf(t.id)!)) : '—'}{priceOf(t.id) != null && !t.addon_available ? <div className="small muted">not for sale</div> : null}</td><td><StatusBadge status={t.archived ? 'archived' : t.active ? 'active' : 'closed'} label={t.archived ? 'Archived' : t.active ? 'Active' : 'Inactive'} /></td>
+              <td>{priceOf(t.id) != null ? (priceOf(t.id) === 0 ? <span className="badge green">Free</span> : <>{inr(priceOf(t.id)!)}{Number(priceRow(t.id)?.discount_pct) ? <div className="small muted"><s>{inr(priceRow(t.id)!.mrp_paise)}</s> · <span className="badge green">{Number(priceRow(t.id)!.discount_pct)}% off</span></div> : null}</>) : '—'}{priceOf(t.id) != null && !t.addon_available ? <div className="small muted">not for sale</div> : null}</td><td><StatusBadge status={t.archived ? 'archived' : t.active ? 'active' : 'closed'} label={t.archived ? 'Archived' : t.active ? 'Active' : 'Inactive'} /></td>
               <td><details><summary className="btn btn-ghost btn-sm">Edit</summary><div style={{ width: 'min(760px, 86vw)', whiteSpace: 'normal', padding: '12px 0' }}>{form(t)}
                 {edit ? <AdminForm action={deleteTest} eventId={eventId} back={back} live={live} hidden={{ id: t.id }} style={{ marginTop: 10 }}>
                   <SubmitButton className="btn btn-red btn-sm" confirm={`Delete ${t.display_name}? It is removed from every package and its add-on prices. Tests already ordered by participants cannot be deleted — archive them instead.`}>Delete test</SubmitButton>

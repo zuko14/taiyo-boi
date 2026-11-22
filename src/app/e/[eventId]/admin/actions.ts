@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache';
 import { getEventContext } from '@/lib/auth';
 import { friendlyError } from '@/lib/errors';
 import { bool, go, intOrNull, safePath, str, strOrNull } from '@/lib/flash';
-import { localInputToIso, toPaise } from '@/lib/format';
+import { discounted, localInputToIso, toPaise, toPct } from '@/lib/format';
 import { createClient, serviceClient } from '@/lib/supabase/server';
 import { VPA_RE } from '@/lib/upi';
 import { codeFromName, mapCatalog, mapPackages, parseCsv } from '@/lib/catalog-import';
@@ -116,14 +116,15 @@ export async function saveTest(fd: FormData) {
     const { error } = await db.from('workflow_service_tests').insert({ event_id: eventId, service_id: service, test_id: testId, completion_rule: rule });
     if (error) go(back, 'err', friendlyError(error));
   }
-  // optional quick add-on price: replaces the active price (existing orders keep their snapshot)
+  // optional quick add-on price (+ discount): replaces the active price (existing orders keep their snapshot)
   if (str(fd, 'price') && ctx.can('addon.price.edit')) {
-    let price = 0;
-    try { price = toPaise(str(fd, 'price')); } catch (e) { go(back, 'err', (e as Error).message); }
-    const { data: cur } = await db.from('addon_prices').select('id, price_paise').eq('test_id', testId).eq('active', true);
-    if (!(cur?.length === 1 && cur[0].price_paise === price)) {
+    let mrp = 0, pct = 0;
+    try { mrp = toPaise(str(fd, 'price')); pct = free ? 0 : toPct(str(fd, 'discount_pct')); } catch (e) { go(back, 'err', (e as Error).message); }
+    const price = discounted(mrp, pct);
+    const { data: cur } = await db.from('addon_prices').select('id, price_paise, discount_pct').eq('test_id', testId).eq('active', true);
+    if (!(cur?.length === 1 && cur[0].price_paise === price && Number(cur[0].discount_pct) === pct)) {
       if (cur?.length) { const { error } = await db.from('addon_prices').update({ active: false }).in('id', cur.map((c) => c.id)); if (error) go(back, 'err', friendlyError(error)); }
-      const { error } = await db.from('addon_prices').insert({ event_id: eventId, test_id: testId, price_paise: price });
+      const { error } = await db.from('addon_prices').insert({ event_id: eventId, test_id: testId, price_paise: price, mrp_paise: pct > 0 ? mrp : null, discount_pct: pct });
       if (error) go(back, 'err', friendlyError(error));
     }
   }
@@ -238,9 +239,10 @@ export async function saveChoiceGroup(fd: FormData) {
 
 export async function savePrice(fd: FormData) {
   const { eventId, ctx, db, done, back } = await admin(fd);
-  let price = 0, tax = 0;
-  try { price = toPaise(str(fd, 'price')); tax = toPaise(str(fd, 'tax') || '0'); } catch (e) { go(back, 'err', (e as Error).message); }
-  const { error } = await db.from('addon_prices').insert({ event_id: eventId, test_id: str(fd, 'test_id'), price_paise: price, tax_paise: tax,
+  let mrp = 0, tax = 0, pct = 0;
+  try { mrp = toPaise(str(fd, 'price')); tax = toPaise(str(fd, 'tax') || '0'); pct = toPct(str(fd, 'discount_pct')); } catch (e) { go(back, 'err', (e as Error).message); }
+  const { error } = await db.from('addon_prices').insert({ event_id: eventId, test_id: str(fd, 'test_id'), price_paise: discounted(mrp, pct), tax_paise: tax,
+    mrp_paise: pct > 0 ? mrp : null, discount_pct: pct,
     location_scope: str(fd, 'location_scope'), require_payment_before_service: bool(fd, 'require_payment'),
     effective_from: iso(fd, 'effective_from', ctx.event.timezone) ?? new Date().toISOString(), effective_to: iso(fd, 'effective_to', ctx.event.timezone) });
   done(error, 'Price added (existing orders keep their price snapshot)');
@@ -424,10 +426,10 @@ export async function deletePackage(fd: FormData) {
 
 export async function setPackageRate(fd: FormData) {
   const { db, done, back } = await admin(fd, 'Package price changed');
-  let amount: number | null = null;
-  if (str(fd, 'price')) { try { amount = toPaise(str(fd, 'price')); } catch (e) { go(back, 'err', (e as Error).message); } }
-  const { error } = await db.rpc('set_package_rate', { p_package: str(fd, 'id'), p_amount_paise: amount, p_reason: strOrNull(fd, 'reason') });
-  done(error, amount == null ? 'Package price cleared' : 'Package price saved');
+  let amount: number | null = null, pct = 0;
+  try { if (str(fd, 'price')) amount = toPaise(str(fd, 'price')); pct = toPct(str(fd, 'discount_pct')); } catch (e) { go(back, 'err', (e as Error).message); }
+  const { error } = await db.rpc('set_package_rate', { p_package: str(fd, 'id'), p_amount_paise: amount, p_reason: strOrNull(fd, 'reason'), p_discount_pct: pct });
+  done(error, amount == null ? 'Package price cleared' : pct ? `Package price saved: ${pct}% off ₹${amount / 100} = ₹${discounted(amount, pct) / 100}` : 'Package price saved');
 }
 
 /** Remove report files from private storage after the database rows are gone. */
@@ -529,4 +531,23 @@ export async function duplicateStation(fd: FormData) {
     if (capErr) go(back, 'err', friendlyError(capErr));
   }
   done(null, `${copy!.name} added — same visits as ${s.name}. Assign staff to it with Add staff.`);
+}
+
+/** One discount % for all priced tests (or one category), optionally packages too. 0% restores the original prices. */
+export async function applyDiscount(fd: FormData) {
+  const { eventId, db, done, back } = await admin(fd, 'Discount applied');
+  let pct = 0;
+  try { pct = toPct(str(fd, 'discount_pct') || '0'); } catch (e) { go(back, 'err', (e as Error).message); }
+  let ids: string[] | null = null;
+  const cat = str(fd, 'category');
+  if (cat) {
+    const { data } = await db.from('test_catalog').select('id').eq('event_id', eventId).eq('category', cat === 'Uncategorised' ? '' : cat);
+    ids = (data ?? []).map((t) => t.id);
+    if (!ids.length) go(back, 'err', 'No tests in that category.');
+  }
+  const { data, error } = await db.rpc('apply_discount', { p_event: eventId, p_discount_pct: pct, p_test_ids: ids,
+    p_include_packages: bool(fd, 'include_packages'), p_reason: strOrNull(fd, 'reason') });
+  const r = data as { tests: number; packages: number } | null;
+  done(error, pct ? `${pct}% discount applied to ${r?.tests ?? 0} test price(s)${r?.packages ? ` and ${r.packages} package(s)` : ''}. Existing orders keep their price.`
+    : `Discount removed: original prices restored for ${r?.tests ?? 0} test price(s)${r?.packages ? ` and ${r.packages} package(s)` : ''}.`);
 }

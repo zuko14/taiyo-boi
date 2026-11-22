@@ -7,7 +7,7 @@ import { UpiPay } from '@/components/UpiPay';
 import { requirePerm } from '@/lib/auth';
 import { nowMs } from '@/lib/clock';
 import { myStations } from '@/lib/duty';
-import { classLabel, inr, locationLabel, priceLabel } from '@/lib/format';
+import { classLabel, inr, locationLabel, priceLabel, priceWithDiscount } from '@/lib/format';
 import { ScanMatches } from '@/components/ScanMatches';
 import { resolveScan, searchRegistrations } from '@/lib/scan';
 import { idemKey } from '@/lib/supabase/server';
@@ -34,7 +34,7 @@ export default async function AddonDesk({ params, searchParams }: { params: Prom
       const inPkg = new Set(snap.tests.map((t) => t.test_id));
       const [{ data: catalog }, { data: prices }, { data: existing }, { data: intents }] = await Promise.all([
         ctx.supabase.from('test_catalog').select('id, code, display_name, location, instructions').eq('event_id', eventId).eq('active', true).eq('archived', false).eq('addon_available', true).order('display_name'),
-        ctx.supabase.from('addon_prices').select('test_id, price_paise, tax_paise, location_scope, effective_from, effective_to').eq('event_id', eventId).eq('active', true),
+        ctx.supabase.from('addon_prices').select('test_id, price_paise, tax_paise, mrp_paise, discount_pct, location_scope, effective_from, effective_to').eq('event_id', eventId).eq('active', true),
         ctx.supabase.from('order_items').select('test_id, status, orders!inner(status)').eq('registration_id', regId).eq('source', 'addon').eq('status', 'active'),
         ctx.supabase.from('payment_intents').select('id, amount_paise, status, order_id, created_at').eq('registration_id', regId).order('created_at', { ascending: false }),
       ]);
@@ -74,7 +74,7 @@ export default async function AddonDesk({ params, searchParams }: { params: Prom
                   <ul className="list">{offer.map((o) => (
                     <li key={o.id}><label className="check"><input type="checkbox" name="t" value={o.id} defaultChecked={selected.includes(o.id)} disabled={!o.price} />
                       <span><span className="strong">{o.display_name}</span> <span className="small muted">· {locationLabel(o.location)}</span></span></label>
-                      <span className="strong">{o.price ? priceLabel(o.price.price_paise + o.price.tax_paise) : <span className="badge red">no price</span>}</span></li>))}</ul>
+                      <span className="strong">{o.price ? priceWithDiscount(o.price.price_paise + o.price.tax_paise, o.price.mrp_paise != null ? o.price.mrp_paise + o.price.tax_paise : null, o.price.discount_pct) : <span className="badge red">no price</span>}</span></li>))}</ul>
                   <button className="btn btn-ghost" style={{ marginTop: 12 }}>Review total</button>
                 </form>
               ) : <Empty>No add-on tests available for this participant.</Empty>}

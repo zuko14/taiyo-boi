@@ -112,3 +112,21 @@ describe('package import', () => {
     expect(r.errors.map((e) => e.line)).toEqual([3, 4]);
   });
 });
+
+describe('discounts', () => {
+  it('rounds like the database and parses percentages', async () => {
+    const { discounted, toPct, priceWithDiscount } = await import('../../src/lib/format.ts');
+    expect(discounted(100000, 20)).toBe(80000);
+    expect(discounted(99999, 12.5)).toBe(87499);          // 87499.125 → 87499
+    expect(discounted(33333, 33.33)).toBe(22223);         // 22222.9 → 22223
+    expect(discounted(50000, 100)).toBe(0);
+    expect(discounted(50000, 0)).toBe(50000);
+    expect(toPct('')).toBe(0);
+    expect(toPct('33.33')).toBe(33.33);
+    expect(() => toPct('101')).toThrow();
+    expect(() => toPct('-1')).toThrow();
+    expect(() => toPct('10.555')).toThrow();
+    expect(priceWithDiscount(80000, 100000, 20)).toMatch(/was .*1,000.*20% off/);
+    expect(priceWithDiscount(0)).toBe('Free');
+  });
+});

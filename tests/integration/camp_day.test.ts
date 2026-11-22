@@ -122,3 +122,57 @@ describe('free tests (active ₹0 price)', () => {
     expect(a?.station_id).toBe(ev.stations['ECG-1'] === a?.station_id ? ev.stations['ECG-1'] : ev.stations['ECG-2']);
   });
 });
+
+describe('discounts', () => {
+  it('bulk discount: applied to every priced test, free stays free, 0% restores, orders keep their price', async () => {
+    const ev = await buildEvent({ code: newCode('DISC') });
+    const admin = ev.users.event_admin.client;
+    await must(db().from('addon_prices').insert([
+      { event_id: ev.eventId, test_id: ev.tests.XRAY, price_paise: 99999 },
+      { event_id: ev.eventId, test_id: ev.tests.PSA, price_paise: 40000 },
+      { event_id: ev.eventId, test_id: ev.tests.ECG, price_paise: 0 }]));
+    const cur = async (code: string) => must<{ price_paise: number; mrp_paise: number | null; discount_pct: number }>(
+      db().from('addon_prices').select('price_paise, mrp_paise, discount_pct').eq('test_id', ev.tests[code]).eq('active', true).single());
+
+    // an order placed before the discount keeps its price
+    const before = await register(ev, 'female');
+    await must(ev.users.addon_staff.client.rpc('create_addon_order', { p_reg: before.registration_id, p_desk: ev.stations['ADD-1'],
+      p_test_ids: [ev.tests.PSA], p_idempotency_key: `b-${before.registration_id}`, p_consent: true }));
+
+    expect(await must(admin.rpc('apply_discount', { p_event: ev.eventId, p_discount_pct: 12.5 }))).toMatchObject({ tests: 2 });
+    expect(await cur('XRAY')).toMatchObject({ price_paise: 87499, mrp_paise: 99999 });
+    expect(await cur('PSA')).toMatchObject({ price_paise: 35000, mrp_paise: 40000 });
+    expect((await cur('ECG')).price_paise).toBe(0);
+    // a second discount is taken off the original price, never stacked
+    await must(admin.rpc('apply_discount', { p_event: ev.eventId, p_discount_pct: 20 }));
+    expect(await cur('PSA')).toMatchObject({ price_paise: 32000, mrp_paise: 40000 });
+
+    const after = await register(ev, 'female');
+    const o = await must<{ intent_id: string }>(ev.users.addon_staff.client.rpc('create_addon_order', { p_reg: after.registration_id, p_desk: ev.stations['ADD-1'],
+      p_test_ids: [ev.tests.PSA], p_idempotency_key: `a-${after.registration_id}`, p_consent: true }));
+    expect((await must<{ amount_paise: number }>(db().from('payment_intents').select('amount_paise').eq('id', o.intent_id).single())).amount_paise).toBe(32000);
+    const old = await must<{ amount_paise: number }[]>(db().from('payment_intents').select('amount_paise').eq('registration_id', before.registration_id));
+    expect(old.map((x) => x.amount_paise)).toEqual([40000]);
+
+    await must(admin.rpc('apply_discount', { p_event: ev.eventId, p_discount_pct: 0 }));
+    expect(await cur('PSA')).toMatchObject({ price_paise: 40000, mrp_paise: null });
+    // the database refuses a price that does not match its discount
+    expect(await rpcError(db().from('addon_prices').insert({ event_id: ev.eventId, test_id: ev.tests.TFT, price_paise: 100, mrp_paise: 1000, discount_pct: 10 }))).toMatch(/discount_math/);
+    // only price editors may discount
+    expect(await rpcError(ev.users.registration_staff.client.rpc('apply_discount', { p_event: ev.eventId, p_discount_pct: 50 }))).toMatch(/permission_denied/);
+  });
+
+  it('package discount: participant is charged the discounted package price', async () => {
+    const ev = await buildEvent({ code: newCode('PDIS') });
+    const { data: e } = await db().from('events').select('settings').eq('id', ev.eventId).single();
+    await must(db().from('events').update({ settings: { ...e!.settings, package_mode: 'custom', payment_model: 'patient_pays', payment_methods: ['cash'] } }).eq('id', ev.eventId));
+    await must(ev.users.event_admin.client.rpc('set_package_rate', { p_package: ev.packages.female, p_amount_paise: 200000, p_discount_pct: 25, p_reason: 'Camp offer' }));
+    const pk = await must<{ price_paise: number; mrp_paise: number; discount_pct: number }>(db().from('packages').select('price_paise, mrp_paise, discount_pct').eq('id', ev.packages.female).single());
+    expect(pk).toMatchObject({ price_paise: 150000, mrp_paise: 200000 });
+    const r = await register(ev, 'female');
+    const pay = await must<{ amount_paise: number }[]>(db().from('payment_intents').select('amount_paise').eq('registration_id', r.registration_id));
+    expect(pay.map((x) => x.amount_paise)).toEqual([150000]);
+    await must(ev.users.event_admin.client.rpc('apply_discount', { p_event: ev.eventId, p_discount_pct: 10, p_include_packages: true }));
+    expect((await must<{ price_paise: number }>(db().from('packages').select('price_paise').eq('id', ev.packages.female).single())).price_paise).toBe(180000);
+  });
+});

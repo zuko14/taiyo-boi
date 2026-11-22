@@ -5,7 +5,7 @@ import { SubmitButton } from '@/components/SubmitButton';
 import { Card, PageHead, StatusBadge } from '@/components/ui';
 import { requirePerm } from '@/lib/auth';
 import { myStations } from '@/lib/duty';
-import { classLabel, dt, inr } from '@/lib/format';
+import { classLabel, dt, priceWithDiscount } from '@/lib/format';
 import { nowMs } from '@/lib/clock';
 import { TestPicker, type PickTest } from '@/components/TestPicker';
 import { idemKey } from '@/lib/supabase/server';
@@ -20,7 +20,7 @@ export default async function RegisterPage({ params, searchParams }: { params: P
   const { stations } = await myStations(ctx, ['registration_counter']);
   const counter = sp.at ?? (stations.length === 1 ? stations[0].id : undefined);
   const base = `/e/${eventId}/register`;
-  const { data: packages } = await ctx.supabase.from('packages').select('id, classification, name, active, price_paise').eq('event_id', eventId).order('classification');
+  const { data: packages } = await ctx.supabase.from('packages').select('id, classification, name, active, price_paise, mrp_paise, discount_pct').eq('event_id', eventId).order('classification');
   const canOverride = ctx.can('registration.classification_override');
   const requireConsent = ctx.event.settings.require_consent !== false;
   const custom = ctx.event.settings.package_mode !== 'female_male';
@@ -30,14 +30,15 @@ export default async function RegisterPage({ params, searchParams }: { params: P
   const [{ data: sellable }, { data: prices }, { data: pkgTests }] = sellTests ? await Promise.all([
     // every active test is listed (unpriced ones greyed out) so the desk never "loses" ECG, 2D Echo…
     ctx.supabase.from('test_catalog').select('id, code, display_name, category, location, addon_available').eq('event_id', eventId).eq('active', true).eq('archived', false).order('category').order('display_name'),
-    ctx.supabase.from('addon_prices').select('test_id, price_paise, tax_paise, location_scope, effective_from, effective_to').eq('event_id', eventId).eq('active', true).order('effective_from', { ascending: false }),
+    ctx.supabase.from('addon_prices').select('test_id, price_paise, tax_paise, mrp_paise, discount_pct, location_scope, effective_from, effective_to').eq('event_id', eventId).eq('active', true).order('effective_from', { ascending: false }),
     ctx.supabase.from('package_tests').select('test_id, packages!inner(classification)').eq('event_id', eventId),
   ]) : [{ data: [] }, { data: [] }, { data: [] }];
   const now = nowMs();
   const pickTests: PickTest[] = (sellable ?? []).map((t) => {
     const p = t.addon_available ? (prices ?? []).find((x) => x.test_id === t.id && (x.location_scope === 'both' || x.location_scope === t.location)
       && new Date(x.effective_from).getTime() <= now && (!x.effective_to || new Date(x.effective_to).getTime() > now)) : undefined;
-    return { id: t.id, code: t.code, name: t.display_name, category: t.category, location: t.location, price_paise: p ? p.price_paise + p.tax_paise : null };
+    return { id: t.id, code: t.code, name: t.display_name, category: t.category, location: t.location, price_paise: p ? p.price_paise + p.tax_paise : null,
+      mrp_paise: p && Number(p.discount_pct) > 0 ? p.mrp_paise! + p.tax_paise : null, discount_pct: p ? Number(p.discount_pct) : 0 };
   });
   const packageTests: Record<string, string[]> = {};
   for (const x of pkgTests ?? []) { const c = (x.packages as unknown as { classification: string }).classification; (packageTests[c] ??= []).push(x.test_id); }
@@ -82,7 +83,7 @@ export default async function RegisterPage({ params, searchParams }: { params: P
                       <span className="title">{classLabel(p.classification)}</span>
                       <span className="small text2">{p.name}</span>
                       {testsOf(p.id).length ? <span className="small muted" title={testsOf(p.id).join(', ')}>{testsOf(p.id).length} tests: {testsOf(p.id).slice(0, 5).join(', ')}{testsOf(p.id).length > 5 ? ` +${testsOf(p.id).length - 5} more` : ''}</span> : null}
-                      <span className="small muted">{sponsored ? 'Sponsored · participant pays ₹0' : p.price_paise ? `Participant pays ${inr(p.price_paise)}` : 'Free for the participant'}</span>
+                      <span className="small muted">{sponsored ? 'Sponsored · participant pays ₹0' : p.price_paise ? `Participant pays ${priceWithDiscount(p.price_paise, p.mrp_paise, p.discount_pct)}` : 'Free for the participant'}</span>
                     </label>
                   ))}
                 </div>

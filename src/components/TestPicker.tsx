@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 /** price_paise null = no active price yet: listed (so the desk can find it) but cannot be sold. */
-export interface PickTest { id: string; name: string; code: string; category: string; price_paise: number | null; location: string }
+export interface PickTest { id: string; name: string; code: string; category: string; price_paise: number | null; location: string; mrp_paise?: number | null; discount_pct?: number }
 
 const rupees = (p: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(p / 100);
 const price = (p: number) => (p === 0 ? 'Free' : rupees(p));
@@ -64,7 +64,8 @@ export function TestPicker({ tests, packageTests, priceHref }: { tests: PickTest
                 <label key={t.id} className={`check test-row ${included || noPrice ? 'muted' : ''}`}>
                   <input type="checkbox" name="test_ids" value={t.id} checked={chosen.has(t.id)} disabled={included || noPrice} onChange={() => toggle(t.id)} />
                   <span className="test-name">{t.name}{t.location === 'walk_in' ? <span className="small muted"> · walk-in centre</span> : null}</span>
-                  <span className="test-price">{included ? 'in package' : noPrice ? 'no price set' : price(t.price_paise!)}</span>
+                  <span className="test-price">{included ? 'in package' : noPrice ? 'no price set' : t.discount_pct && t.mrp_paise != null
+                    ? <><s className="muted">{rupees(t.mrp_paise)}</s> {price(t.price_paise!)} <span className="badge green">{t.discount_pct}% off</span></> : price(t.price_paise!)}</span>
                 </label>);
             })}
           </fieldset>))}
