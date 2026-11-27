@@ -19,7 +19,7 @@ export default async function Permissions({ params, searchParams }: { params: Pr
   ]);
   const role = sp.role ?? 'registration_staff';
   // group permission codes by the area of work they belong to
-  const GROUPS: [string, RegExp][] = [['Registration desk', /^(registration|tag|choice)\./], ['Payments & extra tests', /^(payment|addon\.create)/],
+  const GROUPS: [string, RegExp][] = [['Registration desk', /^(registration|tag|choice)\./], ['Payments & extra tests', /^(payment|addon\.(create|discount))/],
     ['Stations & queue', /^(task|queue|station|shift|walkin)\./], ['Reports', /^report\./], ['Viewing & exports', /^(dashboard|participant|finance|sponsor|audit|export)\./],
     ['Setup (admins)', /./]];
   const groupOf = (code: string) => GROUPS.find(([, re]) => re.test(code))![0];

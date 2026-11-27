@@ -7,7 +7,7 @@ import { requirePerm } from '@/lib/auth';
 import { dt, isoToLocalInput } from '@/lib/format';
 import { labelSettings } from '@/lib/label';
 import { nowMs } from '@/lib/clock';
-import { deleteEvent, resetEvent, saveEventProfile, saveEventSettings, savePaymentSetup } from '../actions';
+import { deleteEvent, resetEvent, resetOperations, saveEventProfile, saveEventSettings, savePaymentSetup } from '../actions';
 import { UpiPay } from '@/components/UpiPay';
 
 const CODE_PRESETS = [
@@ -187,6 +187,16 @@ export default async function EventAdmin({ params }: { params: Promise<{ eventId
       {ctx.can('event.reset') || ctx.profile.is_platform_admin ? (
         <Card title="Danger zone" sub="Use after a pilot or mock run so the same event can be used for the real camp.">
           <div className="grid grid-2">
+            {ctx.can('event.reset') ? (
+              <form action={resetOperations}>
+                <input type="hidden" name="event_id" value={eventId} />
+                <div className="strong">Clear patients only (training drill)</div>
+                <p className="small text2">For mock drills before the real camp. Deletes every patient, registration, tag, add-on order, payment, receipt, queue, attendance record and report. <strong>Staff, their station shifts, stations (open/paused) and all configuration stay exactly as they are</strong>, so the next drill can start straight away. Registration codes and queue tickets restart at 1. Pause the event first.</p>
+                {e.status === 'live' ? <div className="alert alert-warn">The event is live. Pause it (Event status above) before clearing patients.</div> : null}
+                <div className="field"><label htmlFor="ro-reason">Reason</label><input id="ro-reason" name="reason" required placeholder="e.g. Staff drill 1 finished" /></div>
+                <div className="field"><label htmlFor="ro-confirm">Type <span className="mono">{e.code}</span> to confirm</label><input id="ro-confirm" name="confirm" required autoComplete="off" /></div>
+                <SubmitButton className="btn btn-red" disabled={e.status === 'live'} confirm={`Clear all patients from ${e.code}? Staff, shifts and stations are kept. This cannot be undone.`}>Clear patients, keep staff</SubmitButton>
+              </form>) : null}
             {ctx.can('event.reset') ? (
               <form action={resetEvent}>
                 <input type="hidden" name="event_id" value={eventId} />

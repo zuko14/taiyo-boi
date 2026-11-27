@@ -453,6 +453,18 @@ export async function resetEvent(fd: FormData) {
   go(back, 'ok', 'Event reset: all participants, orders, queues and reports were removed. Configuration and staff are kept; status is Draft.');
 }
 
+/** Training drills: clears patients and operations; staff, shifts, stations and status stay. */
+export async function resetOperations(fd: FormData) {
+  const eventId = str(fd, 'event_id');
+  const back = `/e/${eventId}/admin/event`;
+  const ctx = await getEventContext(eventId);
+  const { data, error } = await ctx.supabase.rpc('reset_operations', { p_event: eventId, p_confirm_code: str(fd, 'confirm'), p_reason: str(fd, 'reason') });
+  if (error) go(back, 'err', friendlyError(error));
+  await removeReportFiles(data as string[] | null);
+  revalidatePath(`/e/${eventId}`, 'layout');
+  go(back, 'ok', 'Patients cleared. Staff, shifts and stations are unchanged — set the event live to start the next drill.');
+}
+
 export async function deleteEvent(fd: FormData) {
   const eventId = str(fd, 'event_id');
   const back = safePath(str(fd, 'back'), '/platform');

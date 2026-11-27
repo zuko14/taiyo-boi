@@ -4,10 +4,11 @@ import { ScanBox } from '@/components/ScanBox';
 import { SubmitButton } from '@/components/SubmitButton';
 import { Card, Empty, PageHead, SourceTag, StatusBadge } from '@/components/ui';
 import { UpiPay } from '@/components/UpiPay';
+import { AddonDiscount } from '@/components/AddonDiscount';
 import { requirePerm } from '@/lib/auth';
 import { nowMs } from '@/lib/clock';
 import { myStations } from '@/lib/duty';
-import { classLabel, inr, locationLabel, priceLabel, priceWithDiscount } from '@/lib/format';
+import { classLabel, inr, locationLabel, priceWithDiscount } from '@/lib/format';
 import { ScanMatches } from '@/components/ScanMatches';
 import { resolveScan, searchRegistrations } from '@/lib/scan';
 import { idemKey } from '@/lib/supabase/server';
@@ -46,8 +47,7 @@ export default async function AddonDesk({ params, searchParams }: { params: Prom
       const coveredByPackage = (catalog ?? []).filter((t) => inPkg.has(t.id));
       const offer = (catalog ?? []).filter((t) => !inPkg.has(t.id) && !ordered.has(t.id)).map((t) => ({ ...t, price: priceOf(t.id, t.location) }));
       const selected = ([] as string[]).concat(sp.t ?? []).filter((id) => offer.some((o) => o.id === id && o.price));
-      const total = selected.reduce((n, id) => { const o = offer.find((x) => x.id === id)!; return n + o.price!.price_paise + o.price!.tax_paise; }, 0);
-      const p = reg.participants as unknown as { full_name: string };
+            const p = reg.participants as unknown as { full_name: string };
       const instructions = String(ctx.event.settings.payment_instructions ?? '');
 
       body = (
@@ -60,10 +60,12 @@ export default async function AddonDesk({ params, searchParams }: { params: Prom
           </Card>
           {sp.order ? (
             <Card title="Order created" className="">
-              <div className="alert alert-warn">Payment pending. The add-on test will only be queued after an authorised cashier verifies the payment.</div>
               {(() => { const i = (intents ?? []).find((x) => x.order_id === sp.order && ['pending', 'requires_review'].includes(x.status));
-                return i ? <UpiPay settings={ctx.event.settings} amountPaise={i.amount_paise} reference={reg.registration_code} /> : null; })()}
-              {instructions ? <p className="text2">{instructions}</p> : <p className="muted small">No payment instructions configured for this event.</p>}
+                return i ? (<>
+                  <div className="alert alert-warn">Payment pending: {inr(i.amount_paise)}. The add-on test will only be queued after an authorised cashier verifies the payment.</div>
+                  <UpiPay settings={ctx.event.settings} amountPaise={i.amount_paise} reference={reg.registration_code} />
+                  {instructions ? <p className="text2">{instructions}</p> : <p className="muted small">No payment instructions configured for this event.</p>}
+                </>) : <div className="alert alert-ok">Nothing to pay — the test is queued for the participant.</div>; })()}
             </Card>
           ) : null}
           <div className="grid grid-2">
@@ -87,9 +89,8 @@ export default async function AddonDesk({ params, searchParams }: { params: Prom
                   <input type="hidden" name="event_id" value={eventId} /><input type="hidden" name="reg" value={regId} /><input type="hidden" name="desk" value={desk} />
                   <input type="hidden" name="idem" value={await idemKey()} />
                   {selected.map((id) => <input key={id} type="hidden" name="test_ids" value={id} />)}
-                  <ul className="list">{selected.map((id) => { const o = offer.find((x) => x.id === id)!; return (
-                    <li key={id}><span>{o.display_name}{o.price!.tax_paise ? <span className="small muted"> (incl. {inr(o.price!.tax_paise)} tax/fee)</span> : null}</span><span>{priceLabel(o.price!.price_paise + o.price!.tax_paise)}</span></li>); })}
-                    <li><span className="strong">Total payable by participant</span><span className="strong" style={{ fontSize: '1.3rem' }}>{inr(total)}</span></li></ul>
+                  <AddonDiscount canDiscount={ctx.can('addon.discount') || ctx.can('registration.discount')}
+                    lines={selected.map((id) => { const o = offer.find((x) => x.id === id)!; return { id, name: o.display_name, price_paise: o.price!.price_paise, tax_paise: o.price!.tax_paise }; })} />
                   <label className="check" style={{ marginTop: 10 }}><input type="checkbox" name="consent" required /><span className="small">Participant confirmed the tests and the total above.</span></label>
                   <div style={{ marginTop: 12 }}><SubmitButton className="btn btn-accent btn-block">Create add-on order</SubmitButton></div>
                 </form>
